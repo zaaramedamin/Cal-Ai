@@ -1,0 +1,81 @@
+"""Application settings.
+
+Everything environment-specific enters the app through this one module. Nothing
+else in the codebase reads `os.environ`, so there is exactly one place to look
+when you need to know what the app can be configured with.
+
+Why `pydantic-settings` rather than reading `os.environ` directly:
+
+* Environment variables are always strings. `Settings` declares real types, so
+  `ACCESS_TOKEN_EXPIRE_MINUTES` arrives as an `int` and a typo like `"fifteen"`
+  is a startup error instead of a `TypeError` deep inside a request.
+* A missing required variable fails immediately at import, with a message naming
+  the variable. The alternative — `os.environ.get("DATABASE_URL")` returning
+  `None` — surfaces hours later as a confusing crash somewhere unrelated.
+* It is self-documenting: this class is the authoritative list of every knob,
+  and it is what `.env.example` is kept in sync with.
+"""
+
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# config.py -> core -> app -> backend -> repo root. Resolved from __file__ rather
+# than the working directory, so uvicorn, alembic and pytest all find the same
+# .env no matter which folder they were launched from.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+ENV_FILE = REPO_ROOT / ".env"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=ENV_FILE,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        # The .env also carries POSTGRES_* (consumed by docker-compose) and keys
+        # for phases not yet built. Ignore rather than reject: one .env serving
+        # both compose and the app is less to keep in sync than two.
+        extra="ignore",
+    )
+
+    environment: Literal["development", "staging", "production"] = "development"
+    log_level: str = "INFO"
+
+    database_url: str
+
+    @field_validator("database_url")
+    @classmethod
+    def _require_async_driver(cls, value: str) -> str:
+        """Reject a sync driver loudly instead of silently blocking the loop.
+
+        FastAPI serves requests on a single event loop. A synchronous driver
+        (`postgresql://` → psycopg) blocks that loop for the whole query, so
+        every other in-flight request stalls behind it. The app would still
+        "work" in local testing with one user and fall over under any real
+        concurrency — the worst kind of bug. Failing at startup is cheaper.
+        """
+        if not value.startswith("postgresql+asyncpg://"):
+            raise ValueError(
+                "DATABASE_URL must use the async driver, e.g. "
+                "postgresql+asyncpg://user:pass@localhost:5432/calai — "
+                f"got {value.split('://', 1)[0]!r}"
+            )
+        return value
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment == "development"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the process-wide settings.
+
+    Cached because reading and validating the .env on every request would be
+    pure waste, and because a single instance means configuration cannot drift
+    between two parts of the app mid-run.
+    """
+    return Settings()

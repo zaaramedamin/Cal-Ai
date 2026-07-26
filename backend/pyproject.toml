@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "calai-backend"
+version = "0.1.0"
+description = "CalAi backend — calorie and macronutrient tracking API"
+requires-python = ">=3.13"
+
+# Phase 0 dependencies only. Auth libraries land in Phase 1, HTTP clients for
+# USDA/Open Food Facts in Phase 3. Keeping this list equal to what the code
+# actually imports means it stays a truthful description of the app rather than
+# a pile of things we might one day use.
+dependencies = [
+    "fastapi>=0.136",
+    "uvicorn[standard]>=0.35",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pydantic-settings>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "httpx>=0.28",       # FastAPI's TestClient transport
+    "ruff>=0.9",
+]
+
+# Installing the project itself (`pip install -e .`) is what makes `from app...`
+# resolve identically for uvicorn, alembic and pytest. The alternative — relying
+# on the current working directory being `backend/` — breaks the moment a tool is
+# run from anywhere else, and produces import errors that look like typos.
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+# `alembic/` is a directory in this project, so import sorting otherwise guesses
+# that `alembic` is our own package and files it under first-party — putting it
+# in the wrong import block in every migration. It is a third-party library that
+# happens to share a name with its own config directory.
+known-first-party = ["app"]
+known-third-party = ["alembic"]
+
+[tool.ruff.lint.flake8-bugbear]
+# B008 bans function calls in argument defaults, because a mutable default is
+# evaluated once and then shared across every call — a classic Python trap.
+# FastAPI's dependency injection is built on exactly that syntax, and there it is
+# intentional and safe: FastAPI inspects the default rather than using it as a
+# value. Listing them here keeps the rule protecting us everywhere it should.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Security",
+]
