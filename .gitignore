@@ -1,0 +1,55 @@
+# ---- Secrets ----------------------------------------------------------------
+# .env holds real credentials and API keys. Never commit it.
+# .env.example is committed and documents every variable with dummy values.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---- Python / backend -------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node / mobile ----------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.expo/
+.expo-shared/
+dist/
+web-build/
+*.tsbuildinfo
+
+# Generated API client — regenerated from the backend OpenAPI schema.
+# Committing it would let a stale copy drift from the server contract.
+mobile/src/api/generated/
+
+# ---- Native build output ----------------------------------------------------
+# Created by `expo prebuild`. Regenerable, and huge.
+/mobile/android/
+/mobile/ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# ---- Editors / OS -----------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

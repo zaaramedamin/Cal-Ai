@@ -1,0 +1,42 @@
+# Local development database.
+#
+# Why Docker rather than installing Postgres onto Windows directly: this file IS
+# the setup documentation. Anyone cloning the repo runs one command and has the
+# exact same Postgres version as everyone else, and `docker compose down -v`
+# resets it to a clean slate when a migration goes wrong.
+#
+#   docker compose up -d      start
+#   docker compose ps         check health
+#   docker compose logs -f db follow logs
+#   docker compose down       stop, keep data
+#   docker compose down -v    stop and DESTROY the data volume
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: calai-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-calai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-calai_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-calai}
+    ports:
+      # Bound to 127.0.0.1 so the database is reachable from this machine only.
+      # The phone talks to the FastAPI backend, never directly to Postgres, so
+      # there is no reason to expose 5432 to the local network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - calai_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `depends_on: condition: service_healthy` relies on this. Without it the
+      # backend starts before Postgres is accepting connections and crashes on
+      # the first query — a confusing failure that looks like a code bug.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-calai} -d ${POSTGRES_DB:-calai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  calai_pgdata:
+    name: calai_pgdata
