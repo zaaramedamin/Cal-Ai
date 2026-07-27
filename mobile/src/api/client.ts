@@ -165,7 +165,7 @@ function refreshOnce(): Promise<string | null> {
 /* -------------------------------------------------------------------------- */
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   /** Attach the access token and retry once after refreshing on a 401. */
   authenticated?: boolean;
