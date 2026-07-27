@@ -13,6 +13,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUser
+from app.core.rate_limit import (
+    LOGIN_ACCOUNT_MAX_ATTEMPTS,
+    LOGIN_ACCOUNT_WINDOW_SECONDS,
+    clear_failures,
+    is_blocked,
+    login_rate_limit,
+    password_reset_confirm_rate_limit,
+    password_reset_request_rate_limit,
+    record_failure,
+    refresh_rate_limit,
+    register_rate_limit,
+)
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
@@ -21,16 +33,20 @@ from app.core.security import (
     password_needs_rehash,
     verify_password,
 )
-from app.db.models.user import RefreshToken, RevocationReason, User
+from app.db.models.user import PasswordResetToken, RefreshToken, RevocationReason, User
 from app.db.session import get_session
 from app.schemas.auth import (
     AuthResponse,
     LoginRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
+    PasswordResetRequested,
     RefreshRequest,
     RegisterRequest,
     TokenPair,
     UserRead,
 )
+from app.services.email import send_password_reset
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +71,29 @@ INVALID_REFRESH_TOKEN = HTTPException(
     detail="Invalid or expired refresh token",
     headers={"WWW-Authenticate": "Bearer"},
 )
+
+def _too_many_attempts(retry_after_seconds: float) -> HTTPException:
+    """A 429 that tells the caller how long to wait.
+
+    RFC 6585 requires Retry-After on a 429, and the mobile app shows the wait
+    rather than letting the user hammer a button that cannot work. Easy to omit
+    on a hand-built exception — the per-IP limiter sets it, so an account-level
+    429 without it would be silently inconsistent.
+    """
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many sign-in attempts for this account. Please wait and try again.",
+        headers={"Retry-After": str(max(1, int(retry_after_seconds) + 1))},
+    )
+
+
+def _record_login_failure(email: str) -> None:
+    record_failure(
+        "login-account",
+        email,
+        times=LOGIN_ACCOUNT_MAX_ATTEMPTS,
+        seconds=LOGIN_ACCOUNT_WINDOW_SECONDS,
+    )
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 UserAgentDep = Annotated[str | None, Header(alias="User-Agent")]
@@ -102,6 +141,7 @@ async def _revoke_all_for_user(
     response_model=AuthResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create an account and sign in",
+    dependencies=[Depends(register_rate_limit)],
 )
 async def register(
     payload: RegisterRequest, session: SessionDep, user_agent: UserAgentDep = None
@@ -141,11 +181,33 @@ async def register(
     return AuthResponse(**tokens.model_dump(), user=UserRead.model_validate(user))
 
 
-@router.post("/login", response_model=AuthResponse, summary="Sign in")
+@router.post(
+    "/login",
+    response_model=AuthResponse,
+    summary="Sign in",
+    dependencies=[Depends(login_rate_limit)],
+)
 async def login(
     payload: LoginRequest, session: SessionDep, user_agent: UserAgentDep = None
 ) -> AuthResponse:
-    """Exchange email and password for a token pair."""
+    """Exchange email and password for a token pair.
+
+    Limited twice over: by IP through the dependency above, and per-account
+    below. The per-account limit is the one that matters against a botnet, where
+    every request comes from a different address and no per-IP budget is ever
+    reached.
+    """
+    account_key = payload.email.strip()
+
+    blocked_for = is_blocked(
+        "login-account",
+        account_key,
+        times=LOGIN_ACCOUNT_MAX_ATTEMPTS,
+        seconds=LOGIN_ACCOUNT_WINDOW_SECONDS,
+    )
+    if blocked_for is not None:
+        raise _too_many_attempts(blocked_for)
+
     result = await session.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
@@ -153,10 +215,17 @@ async def login(
         # Burn the same CPU as a real verification before failing. See
         # _DUMMY_PASSWORD_HASH above.
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
+        _record_login_failure(account_key)
         raise INVALID_CREDENTIALS
 
     if not verify_password(payload.password, user.password_hash):
+        _record_login_failure(account_key)
         raise INVALID_CREDENTIALS
+
+    # Successful login wipes the account's failure count. Otherwise someone who
+    # mistypes four times then succeeds still carries four strikes, and a later
+    # genuine slip locks them out. Limits should punish failure, not use.
+    clear_failures("login-account", account_key)
 
     # We have the plaintext here and nowhere else, so this is the only moment we
     # can upgrade a hash created under weaker parameters. Without it, raising the
@@ -171,7 +240,12 @@ async def login(
     return AuthResponse(**tokens.model_dump(), user=UserRead.model_validate(user))
 
 
-@router.post("/refresh", response_model=TokenPair, summary="Exchange a refresh token")
+@router.post(
+    "/refresh",
+    response_model=TokenPair,
+    summary="Exchange a refresh token",
+    dependencies=[Depends(refresh_rate_limit)],
+)
 async def refresh(
     payload: RefreshRequest, session: SessionDep, user_agent: UserAgentDep = None
 ) -> TokenPair:
@@ -254,6 +328,115 @@ async def logout(payload: RefreshRequest, session: SessionDep) -> Response:
         stored.revoked_at = datetime.now(UTC)
         stored.revoked_reason = RevocationReason.LOGOUT
         await session.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/password-reset/request",
+    response_model=PasswordResetRequested,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request a password reset link",
+    dependencies=[Depends(password_reset_request_rate_limit)],
+)
+async def request_password_reset(
+    payload: PasswordResetRequest, session: SessionDep
+) -> PasswordResetRequested:
+    """Send a reset link, if the account exists.
+
+    Always 202 with the same message. Answering differently for an unknown
+    address would make this a free tool for discovering who has an account, and
+    unlike registration there is no usability cost to staying quiet — the message
+    reads naturally whether or not the address is registered.
+
+    202 Accepted rather than 200 OK is the honest status: we have accepted the
+    request, and delivery happens outside this response.
+    """
+    result = await session.execute(select(User).where(User.email == payload.email.strip()))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        # Deliberately silent. Same shape, same timing budget, no hint.
+        logger.info("Password reset requested for unknown address")
+        return PasswordResetRequested()
+
+    # Invalidate any outstanding links first, so requesting a second one makes
+    # the first dead. Otherwise every request a user makes leaves another live
+    # key to their account sitting in their inbox.
+    await session.execute(
+        update(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None))
+        .values(used_at=datetime.now(UTC))
+    )
+
+    raw_token = generate_refresh_token()
+    settings = get_settings()
+    session.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_refresh_token(raw_token),
+            expires_at=datetime.now(UTC)
+            + timedelta(minutes=settings.password_reset_expire_minutes),
+        )
+    )
+    await session.commit()
+
+    send_password_reset(user.email, raw_token)
+    logger.info("Password reset issued for user %s", user.id)
+
+    return PasswordResetRequested(
+        debug_reset_token=raw_token if settings.is_development else None
+    )
+
+
+@router.post(
+    "/password-reset/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Set a new password using a reset token",
+    dependencies=[Depends(password_reset_confirm_rate_limit)],
+)
+async def confirm_password_reset(payload: PasswordResetConfirm, session: SessionDep) -> Response:
+    """Consume a reset token and set the new password.
+
+    Revoking every refresh token afterwards is the part that makes this a real
+    recovery mechanism rather than a convenience. Someone resetting their
+    password has usually either forgotten it or believes they were compromised —
+    and in the second case, leaving the attacker's existing sessions alive would
+    make the reset almost pointless. The attacker holds a refresh token, not the
+    password, so changing the password alone does not touch them.
+    """
+    result = await session.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == hash_refresh_token(payload.token)
+        )
+    )
+    reset = result.scalar_one_or_none()
+
+    # One error for every failure mode — unknown, spent, expired. Distinguishing
+    # them would let someone probe which tokens ever existed.
+    if reset is None or not reset.is_usable:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link is invalid or has expired. Request a new one.",
+        )
+
+    user = await session.get(User, reset.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link is invalid or has expired. Request a new one.",
+        )
+
+    user.password_hash = hash_password(payload.new_password)
+    reset.used_at = datetime.now(UTC)
+    await _revoke_all_for_user(session, user.id, RevocationReason.PASSWORD_RESET)
+
+    # The account was locked out of logging in; a successful reset should clear
+    # that, or the user fixes their password and still cannot get in.
+    clear_failures("login-account", user.email)
+
+    await session.commit()
+    logger.info("Password reset completed for user %s; all sessions revoked", user.id)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

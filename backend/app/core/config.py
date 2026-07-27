@@ -62,6 +62,22 @@ class Settings(BaseSettings):
     # logout deletes it.
     refresh_token_expire_days: int = 30
 
+    # Short on purpose. A reset link sits in an inbox, which is a far less
+    # trustworthy place than the device keystore — shared computers, forwarded
+    # mail, a mailbox someone else already has access to. Thirty minutes is long
+    # enough to walk to a laptop and short enough that a stale link is useless.
+    password_reset_expire_minutes: int = 30
+
+    # ---- Rate limiting ----------------------------------------------------
+    # Switched off in tests, where dozens of deliberate login failures would
+    # otherwise trip the limiter and make unrelated assertions fail.
+    rate_limit_enabled: bool = True
+
+    # Only enable behind a proxy that overwrites X-Forwarded-For (Railway, Fly,
+    # a properly configured nginx). Trusting the header without one lets any
+    # client forge its address and bypass every per-IP limit.
+    trust_proxy_headers: bool = False
+
     @field_validator("secret_key")
     @classmethod
     def _reject_placeholder_secret(cls, value: str) -> str:

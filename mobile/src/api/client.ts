@@ -61,18 +61,38 @@ export class ApiError extends Error {
   readonly status?: number;
   /** `detail` from the backend's error body, when it sent one. */
   readonly detail?: string;
+  /** Seconds to wait, parsed from `Retry-After` on a 429. */
+  readonly retryAfterSeconds?: number;
 
-  constructor(kind: ApiErrorKind, message: string, status?: number, detail?: string) {
+  constructor(
+    kind: ApiErrorKind,
+    message: string,
+    status?: number,
+    detail?: string,
+    retryAfterSeconds?: number,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
     this.status = status;
     this.detail = detail;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+
+  get isRateLimited(): boolean {
+    return this.status === 429;
   }
 
   /** Copy suitable for showing a user directly. */
   get userMessage(): string {
+    // A rate-limit message without a duration is actively unhelpful — the user
+    // has no idea whether to wait ten seconds or an hour, so they retry
+    // immediately and stay blocked.
+    if (this.isRateLimited && this.retryAfterSeconds) {
+      return `Too many attempts. Try again in ${formatWait(this.retryAfterSeconds)}.`;
+    }
     if (this.detail) return this.detail;
+
     switch (this.kind) {
       case 'timeout':
         return 'The server took too long to respond. Check your connection and try again.';
@@ -84,6 +104,12 @@ export class ApiError extends Error {
         return 'Something went wrong on the server. Try again in a moment.';
     }
   }
+}
+
+function formatWait(seconds: number): string {
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -200,11 +226,15 @@ async function toApiError(response: Response): Promise<ApiError> {
   } catch {
     // Non-JSON error body. Fall back to the generic message.
   }
+  const retryAfterHeader = response.headers.get('Retry-After');
+  const retryAfter = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : NaN;
+
   return new ApiError(
     'http',
     `${response.status} ${response.statusText}`,
     response.status,
     detail,
+    Number.isFinite(retryAfter) ? retryAfter : undefined,
   );
 }
 

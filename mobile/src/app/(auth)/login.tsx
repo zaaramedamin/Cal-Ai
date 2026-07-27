@@ -12,6 +12,7 @@ export default function LoginScreen() {
       footerText="No account yet?"
       footerLinkLabel="Create one"
       footerHref="/register"
+      showForgotPassword
       onSubmit={signIn}
     />
   );

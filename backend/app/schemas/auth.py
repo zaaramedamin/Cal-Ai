@@ -59,6 +59,34 @@ class TokenPair(BaseModel):
     expires_in: int = Field(description="Seconds until the access token expires.")
 
 
+class PasswordResetRequest(BaseModel):
+    # Plain str, not EmailStr, for the same reason as LoginRequest: a malformed
+    # address should get the same neutral answer as a valid one, not a 422 that
+    # confirms the format was at least right.
+    email: str
+
+
+class PasswordResetRequested(BaseModel):
+    """Always the same message, whether or not the account exists.
+
+    Confirming "no account with that email" here would turn this endpoint into a
+    free account-enumeration oracle — and unlike registration, there is no
+    usability argument for leaking it, because the honest message reads perfectly
+    well either way.
+    """
+
+    message: str = "If an account exists for that address, a reset link is on its way."
+
+    #: Development only. Lets the flow be tested without a mail provider, and is
+    #: never populated when ENVIRONMENT is anything but `development`.
+    debug_reset_token: str | None = None
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+
+
 class AuthResponse(TokenPair):
     """Returned by register and login.
 

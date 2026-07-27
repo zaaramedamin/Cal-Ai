@@ -9,6 +9,6 @@ the table, because as far as it can tell the table should not exist.
 `alembic/env.py` imports this package for exactly that reason.
 """
 
-from app.db.models.user import RefreshToken, User
+from app.db.models.user import PasswordResetToken, RefreshToken, RevocationReason, User
 
-__all__ = ["RefreshToken", "User"]
+__all__ = ["PasswordResetToken", "RefreshToken", "RevocationReason", "User"]

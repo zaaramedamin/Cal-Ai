@@ -255,6 +255,25 @@ If step 2 and 3 look identical, the error handling is not actually doing its job
 - **Tokens live in `expo-secure-store`, never AsyncStorage.** AsyncStorage is a plaintext file;
   SecureStore uses the iOS Keychain and Android's hardware-backed Keystore, so the OS holds the
   encryption key and the app never sees it.
+- **Login is rate limited per IP *and* per account.** Per-IP alone is weak against a botnet, where
+  every request comes from a different address and no per-IP budget is ever reached. A successful
+  login clears the account's counter, so limits punish failure rather than use.
+- **A completed password reset revokes every session.** People reset because they forgot — or
+  because they think they were compromised. An attacker holds a refresh token, not the password,
+  so changing the password alone would not touch them.
+
+### Known limitation: rate limit counters are per-process
+
+They live in the memory of one Python process. Two uvicorn workers keep separate tallies, so the
+effective limit doubles, and a restart resets them. That is acceptable for a single-process
+deployment and is genuinely weak at scale — the fix is Redis, and it is deliberately isolated to
+`backend/app/core/rate_limit.py` so the swap touches one file.
+
+### Known limitation: no email provider
+
+`backend/app/services/email.py` logs the reset link instead of sending it, and in development the
+token is echoed in the API response so the flow is testable end to end. The seam is real, so
+adding a provider in Phase 7 changes that one module.
 
 ---
 

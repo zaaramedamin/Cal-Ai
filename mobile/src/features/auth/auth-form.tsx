@@ -38,6 +38,8 @@ export interface AuthFormProps {
   footerHref: '/login' | '/register';
   /** Register asks twice; login does not. */
   requireConfirmation?: boolean;
+  /** Login shows a recovery link; register has nothing to recover. */
+  showForgotPassword?: boolean;
   onSubmit: (email: string, password: string) => Promise<void>;
 }
 
@@ -55,6 +57,7 @@ export function AuthForm({
   footerLinkLabel,
   footerHref,
   requireConfirmation = false,
+  showForgotPassword = false,
   onSubmit,
 }: AuthFormProps) {
   const [email, setEmail] = useState('');
@@ -197,6 +200,12 @@ export function AuthForm({
             )}
           </View>
 
+          {showForgotPassword && (
+            <Link href="/forgot-password" style={styles.forgotLink}>
+              Forgot your password?
+            </Link>
+          )}
+
           {formError && (
             <View style={styles.formError} accessibilityRole="alert">
               <Text style={styles.formErrorText}>{formError}</Text>
@@ -231,6 +240,14 @@ const styles = StyleSheet.create({
   },
   fields: {
     gap: space.lg,
+  },
+  forgotLink: {
+    ...text.label,
+    color: color.clay,
+    marginTop: space.lg,
+    // Aligned right, below the password field it relates to — the conventional
+    // position, so people find it without reading.
+    alignSelf: 'flex-end',
   },
   formError: {
     marginTop: space.lg,

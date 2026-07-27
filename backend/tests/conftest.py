@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
+from app.core.rate_limit import reset_all
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 TEST_DB_NAME = "calai_test"
@@ -79,6 +80,12 @@ def _prepare_database() -> Iterator[None]:
     # be cleared because Settings is lru_cached and Alembic's env.py calls it.
     previous = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
+    # Rate limiting off by default. The auth tests make dozens of deliberate
+    # failed logins, which would otherwise trip the limiter and fail assertions
+    # about credentials with a 429 — a confusing failure in an unrelated test.
+    # The tests that care switch it back on explicitly.
+    os.environ["RATE_LIMIT_ENABLED"] = "false"
     get_settings.cache_clear()
 
     config = Config(str(BACKEND_DIR / "alembic.ini"))
@@ -122,8 +129,30 @@ async def _clean_tables(engine) -> AsyncGenerator[None]:
     order tests happen to run in.
     """
     yield
+    reset_all()
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE TABLE refresh_tokens, users RESTART IDENTITY CASCADE"))
+        await conn.execute(
+            text(
+                "TRUNCATE TABLE password_reset_tokens, refresh_tokens, users "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
+
+
+@pytest.fixture
+def rate_limited() -> Iterator[None]:
+    """Turn rate limiting on for a single test.
+
+    Counters are cleared on the way in as well as out, so a test starts from a
+    clean budget regardless of what ran before it.
+    """
+    os.environ["RATE_LIMIT_ENABLED"] = "true"
+    get_settings.cache_clear()
+    reset_all()
+    yield
+    os.environ["RATE_LIMIT_ENABLED"] = "false"
+    get_settings.cache_clear()
+    reset_all()
 
 
 @pytest.fixture

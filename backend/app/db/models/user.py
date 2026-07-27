@@ -39,6 +39,12 @@ class User(UUIDPrimaryKey, TimestampedCreation, Base):
         passive_deletes=True,
     )
 
+    password_reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     def __repr__(self) -> str:
         # Deliberately excludes email and password_hash. Repr output ends up in
         # logs and exception traces, which are exactly the places personal data
@@ -68,6 +74,7 @@ class RevocationReason(enum.StrEnum):
     LOGOUT = "logout"
     LOGOUT_ALL = "logout_all"
     REUSE_DETECTED = "reuse_detected"
+    PASSWORD_RESET = "password_reset"
 
 
 class RefreshToken(UUIDPrimaryKey, TimestampedCreation, Base):
@@ -136,3 +143,40 @@ class RefreshToken(UUIDPrimaryKey, TimestampedCreation, Base):
 
     def __repr__(self) -> str:
         return f"<RefreshToken {self.id} user={self.user_id}>"
+
+
+class PasswordResetToken(UUIDPrimaryKey, TimestampedCreation, Base):
+    """A single-use, short-lived permission to set a new password.
+
+    Same storage discipline as refresh tokens — we keep only the SHA-256, because
+    a readable reset token in the database is a way to take over any account.
+
+    `used_at` rather than deleting the row on use. A spent token being presented
+    again is worth being able to see, and keeping it makes single-use
+    enforcement a simple check rather than depending on the absence of a row,
+    which is indistinguishable from a token that never existed.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
+    user: Mapped[User] = relationship(back_populates="password_reset_tokens")
+
+    @property
+    def is_usable(self) -> bool:
+        return self.used_at is None and self.expires_at > datetime.now(UTC)
+
+    def __repr__(self) -> str:
+        return f"<PasswordResetToken {self.id} user={self.user_id}>"
