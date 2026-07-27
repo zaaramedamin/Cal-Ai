@@ -19,6 +19,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/auth/context';
+import { HOME } from '@/routes';
 import { color } from '@/theme/tokens';
 import { fontAssets } from '@/theme/typography';
 
@@ -53,9 +54,7 @@ function useProtectedRoute() {
     } else if (status === 'authenticated' && inAuthGroup) {
       // `replace`, not `push`: the login screen must not remain on the back
       // stack, or Android's back gesture returns to it after signing in.
-      // The literal '/(tabs)/index' rather than '/': SDK 54's typed-route
-      // generator names a group index that way and does not emit '/'.
-      router.replace('/(tabs)/index');
+      router.replace(HOME);
     }
   }, [status, segments, router]);
 }

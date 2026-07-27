@@ -31,6 +31,7 @@ import { Button } from '@/components/button';
 import { OptionList, type Option } from '@/components/option-list';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { HOME } from '@/routes';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -118,7 +119,7 @@ export default function OnboardingScreen() {
         timezone: deviceTimezone(),
       });
       // The dashboard refetches on focus, so it will show the new targets.
-      router.replace('/(tabs)/index');
+      router.replace(HOME);
     } catch (caught) {
       setError(
         caught instanceof ApiError ? caught.userMessage : 'Something went wrong. Try again.',

@@ -24,6 +24,7 @@ import { Button } from '@/components/button';
 import { MacroBar } from '@/components/macro-bar';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -99,7 +100,7 @@ export default function FoodDetailScreen() {
       // Back to the dashboard, which refetches on focus. dismissAll rather than
       // back, so the search screen is not left behind on the stack.
       router.dismissAll();
-      router.replace('/(tabs)/index');
+      router.replace(HOME);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.userMessage : 'Could not log this food.');
     } finally {
