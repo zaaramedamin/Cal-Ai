@@ -24,15 +24,18 @@
  * use, and they carry the character we want.
  */
 
-import {
-  Fraunces_600SemiBold,
-  Fraunces_700Bold,
-} from '@expo-google-fonts/fraunces';
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-} from '@expo-google-fonts/inter';
+// Deep subpath imports, deliberately — NOT `from '@expo-google-fonts/inter'`.
+//
+// The package root re-exports every weight, and each of those re-exports
+// `require()`s its own .ttf. Metro cannot tree-shake that away, so importing
+// from the root bundles all ~18 weights of both families: measured at 8 MB of
+// dead font data in the Android bundle. Importing the specific weight's module
+// pulls exactly one file each.
+import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces/600SemiBold';
+import { Fraunces_700Bold } from '@expo-google-fonts/fraunces/700Bold';
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
 import type { TextStyle } from 'react-native';
 
 import { color } from './tokens';
