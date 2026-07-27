@@ -38,15 +38,19 @@ type State =
 
 export default function SearchScreen() {
   const router = useRouter();
-  const { slot, day, mode } = useLocalSearchParams<{
+  const { slot, day, mode, q } = useLocalSearchParams<{
     slot?: MealSlot;
     day?: string;
     /** 'recipe' adds the chosen food to the recipe draft instead of the diary. */
     mode?: string;
+    /** Pre-filled search text. The scan screen sends the name it detected but
+        could not match, so the user resumes from that word instead of retyping
+        something they just watched the app fail to find. */
+    q?: string;
   }>();
   const pickingIngredient = mode === 'recipe';
 
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(q ?? '');
   const [state, setState] = useState<State>({ kind: 'idle' });
 
   // Tracks the most recent query so a slow response for an earlier one cannot

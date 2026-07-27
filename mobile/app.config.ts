@@ -59,6 +59,21 @@ const config: ExpoConfig = {
         imageWidth: 76,
       },
     ],
+    [
+      // Meal photo scanning. The strings below are what iOS shows in the
+      // permission dialog, and they are the only chance to explain *why* before
+      // the user decides — a generic "CalAi would like to access the camera" is
+      // the most common reason a permission gets denied.
+      'expo-image-picker',
+      {
+        cameraPermission: 'CalAi uses your camera to identify the food on your plate.',
+        photosPermission: 'CalAi reads a photo you choose so it can identify the food in it.',
+        // We never record audio. Set false so the config plugin does not add
+        // RECORD_AUDIO to the Android manifest — an unused dangerous permission
+        // is something a user will notice and hold against the app.
+        microphonePermission: false,
+      },
+    ],
   ],
 
   experiments: {

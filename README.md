@@ -15,6 +15,13 @@ No nutrition value in this app is estimated, guessed, or hardcoded. Every food c
 and every stored row keeps its `source` and `source_id` so any number on screen can be traced back
 to its origin. Where a source genuinely does not report a nutrient, the app shows `—`, never `0`.
 
+**This rule is why the AI photo scanner is built the way it is.** Asking a vision model "how many
+calories is this?" would break it on the first request. So the model is never asked. It answers only
+*which foods are on the plate* and *roughly how many grams of each* — its output schema has no field
+for a calorie — and those names are then matched against the USDA-backed database, which supplies
+every number. The user confirms the portions before anything is logged. The AI proposes, USDA
+prices, the user decides.
+
 ---
 
 ## Stack
@@ -67,6 +74,15 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 
 `.env` is gitignored. `.env.example` is committed and documents every variable — it must never
 contain a real secret.
+
+**Optional — AI meal photo scanning.** Leave `GEMINI_API_KEY` blank and everything else works; the
+scan screen simply reports that the feature is switched off. To enable it, get a free key from
+[Google AI Studio](https://aistudio.google.com/apikey) (no credit card, roughly 250 scans a day) and
+paste it in:
+
+```
+GEMINI_API_KEY=AIza...
+```
 
 ### 3. Database
 
@@ -236,6 +252,12 @@ If step 2 and 3 look identical, the error handling is not actually doing its job
   15 requests/minute per IP — a handful of users typing in a search box would exhaust that and earn
   an IP ban. Caching in our own Postgres turns thousands of searches into a few upstream calls, and
   keeps the API key out of a mobile bundle, where nothing is secret.
+- **The photo scanner splits identification from nutrition.** Gemini gets the photo and returns food
+  names and gram estimates under a response schema with no nutrition field in it; the calories come
+  from the USDA cache afterwards. The failure mode this buys is a survivable one — a hallucinating
+  model names the wrong food, which the user sees on the review screen and corrects, instead of
+  silently inventing a number that looks as authoritative as a real one. Photos are held in memory
+  for the request and never stored.
 - **The diary snapshots nutrient values at log time** rather than recalculating from the food row.
   USDA revises values and users edit recipes; last Tuesday's lunch must not change retroactively.
   Think invoice line item, not live price lookup.
@@ -293,5 +315,6 @@ adding a provider in Phase 7 changes that one module.
 | 3 | USDA integration, normalization, caching, search | ✅ |
 | 4 | Diary: log to meal slots, daily summary, macro bar | ✅ |
 | 5 | Custom recipes with live nutrition totals | ✅ |
+| — | AI meal photo scanning (Gemini identifies foods and portions; USDA prices them) | ✅ |
 | 6 | Weight trends, weekly averages, streaks, empty/loading/error states throughout | |
 | 7 | Deployment, builds, screenshots | |

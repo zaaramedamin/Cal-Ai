@@ -50,6 +50,7 @@ export default function HomeScreen() {
   const [day, setDay] = useState(localDateString());
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [streak, setStreak] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -139,18 +140,77 @@ export default function HomeScreen() {
       {state.kind === 'ready' && <Dashboard summary={state.summary} onDelete={confirmDelete} />}
 
       {/* The floating log button — the app's most-used control, so it is the
-          largest target on screen and never scrolls away. */}
+          largest target on screen and never scrolls away. It now opens a choice
+          of two ways to log, because photo and search are genuinely different
+          starting points rather than one being a mode of the other. */}
+      {menuOpen && (
+        <Pressable
+          onPress={() => setMenuOpen(false)}
+          accessibilityLabel="Close menu"
+          style={styles.scrim}
+        />
+      )}
+
+      {menuOpen && (
+        <View style={styles.menu}>
+          <FabAction
+            icon="camera"
+            label="Scan a meal"
+            onPress={() => {
+              setMenuOpen(false);
+              router.push({ pathname: '/scan', params: { day } });
+            }}
+          />
+          <FabAction
+            icon="search"
+            label="Search food"
+            onPress={() => {
+              setMenuOpen(false);
+              router.push({ pathname: '/search', params: { slot: slotForNow(), day } });
+            }}
+          />
+        </View>
+      )}
+
       <Pressable
-        onPress={() =>
-          router.push({ pathname: '/search', params: { slot: slotForNow(), day } })
-        }
+        onPress={() => setMenuOpen((open) => !open)}
         accessibilityRole="button"
-        accessibilityLabel="Log food"
+        accessibilityLabel={menuOpen ? 'Close log menu' : 'Log food'}
+        accessibilityState={{ expanded: menuOpen }}
         style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
       >
-        <Ionicons name="add" size={30} color={color.onDark} />
+        <Ionicons name={menuOpen ? 'close' : 'add'} size={30} color={color.onDark} />
       </Pressable>
     </Screen>
+  );
+}
+
+/** One row of the + menu: a readable label beside a round icon button. */
+function FabAction({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.menuRow, pressed && styles.fabPressed]}
+    >
+      {/* The label is a tap target too, not just a caption — a bare icon here
+          would make the user guess which circle is which. */}
+      <View style={styles.menuLabelPill}>
+        <Text style={styles.menuLabel}>{label}</Text>
+      </View>
+      <View style={styles.menuIcon}>
+        <Ionicons name={icon} size={22} color={color.onDark} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -378,6 +438,40 @@ const styles = StyleSheet.create({
 
   emptyBody: { marginTop: space.xs, fontSize: 13 },
   partialNote: { ...text.bodyMuted, fontSize: 12, marginTop: space.sm },
+
+  // Covers the whole screen so a tap anywhere dismisses the menu. Barely tinted:
+  // enough to signal "this is modal", not enough to hide the day underneath.
+  scrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(23, 24, 26, 0.18)',
+  },
+  menu: {
+    position: 'absolute',
+    right: space.xl,
+    bottom: space.xl + 60 + space.md,
+    alignItems: 'flex-end',
+    gap: space.md,
+  },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  menuLabelPill: {
+    backgroundColor: color.surface,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+    ...cardShadow,
+    elevation: 4,
+  },
+  menuLabel: { ...text.label, fontSize: 14 },
+  menuIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.pill,
+    backgroundColor: color.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...cardShadow,
+    elevation: 4,
+  },
 
   fab: {
     position: 'absolute',
