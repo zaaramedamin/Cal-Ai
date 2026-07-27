@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     usda_api_key: str = "DEMO_KEY"
     off_user_agent: str = "CalAi/0.1 (contact@example.com)"
 
+    # ---- AI meal scanning ---------------------------------------------------
+    # Empty means the scan feature is disabled and its endpoint answers 503 with
+    # instructions — unlike SECRET_KEY this must NOT prevent boot, because the
+    # rest of the app works fine without it. Free key: aistudio.google.com/apikey
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+
     @field_validator("secret_key")
     @classmethod
     def _reject_placeholder_secret(cls, value: str) -> str:
