@@ -44,23 +44,25 @@ export function Button({ label, onPress, disabled = false, loading = false }: Bu
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: HIT_SLOP_MIN,
+    minHeight: 52,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: space.xl,
-    backgroundColor: color.clay,
-    borderRadius: radius.md,
+    // Black pill — the single action treatment of the whole app. One button
+    // style everywhere is what makes the primary action instantly findable.
+    backgroundColor: color.ink,
+    borderRadius: radius.pill,
+    minWidth: HIT_SLOP_MIN,
   },
   pressed: {
-    backgroundColor: color.clayDeep,
+    opacity: 0.85,
   },
   disabled: {
-    opacity: 0.45,
+    opacity: 0.35,
   },
   label: {
     ...text.label,
-    // White on `clay` clears AA for body text; the macro colours never carry
-    // small text for exactly this reason.
+    fontSize: 16,
     color: color.onDark,
   },
 });

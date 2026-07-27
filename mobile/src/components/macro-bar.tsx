@@ -87,9 +87,9 @@ export function MacroBar({
       >
         {!isEmpty && (
           <>
-            <View style={{ flex: kcal.protein, backgroundColor: color.moss }} />
-            <View style={{ flex: kcal.carbs, backgroundColor: color.wheat }} />
-            <View style={{ flex: kcal.fat, backgroundColor: color.plum }} />
+            <View style={{ flex: kcal.protein, backgroundColor: color.protein }} />
+            <View style={{ flex: kcal.carbs, backgroundColor: color.carbs }} />
+            <View style={{ flex: kcal.fat, backgroundColor: color.fat }} />
           </>
         )}
       </View>
@@ -103,9 +103,9 @@ export function MacroBar({
 
       {showLegend && (
         <View style={styles.legend}>
-          <LegendItem swatch={color.moss} label="P" grams={macros.protein_g} />
-          <LegendItem swatch={color.wheat} label="C" grams={macros.carbs_g} />
-          <LegendItem swatch={color.plum} label="F" grams={macros.fat_g} />
+          <LegendItem swatch={color.protein} label="P" grams={macros.protein_g} />
+          <LegendItem swatch={color.carbs} label="C" grams={macros.carbs_g} />
+          <LegendItem swatch={color.fat} label="F" grams={macros.fat_g} />
         </View>
       )}
     </View>
@@ -123,9 +123,9 @@ function LegendItem({
 }) {
   return (
     <View style={styles.legendItem}>
-      {/* The swatch carries the colour; the letter carries the meaning. Colour is
-          never the only signal — roughly 1 in 12 men cannot separate the moss
-          and wheat reliably. */}
+      {/* The swatch carries the colour; the letter carries the meaning. Colour
+          is never the only signal — roughly 1 in 12 men cannot reliably separate
+          some of these hues. */}
       <View style={[styles.swatch, { backgroundColor: swatch }]} />
       <Text style={styles.legendLabel}>{label}</Text>
       <Text style={styles.legendValue}>{Math.round(grams)}g</Text>

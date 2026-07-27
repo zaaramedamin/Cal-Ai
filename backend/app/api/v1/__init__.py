@@ -8,7 +8,7 @@ place instead of being repeated in every file.
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, diary, foods, health, profile, recipes, users
+from app.api.v1 import auth, diary, foods, health, profile, progress, recipes, users
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -18,3 +18,4 @@ api_router.include_router(profile.router)
 api_router.include_router(foods.router)
 api_router.include_router(diary.router)
 api_router.include_router(recipes.router)
+api_router.include_router(progress.router)

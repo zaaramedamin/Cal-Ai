@@ -21,20 +21,16 @@ const config: ExpoConfig = {
   scheme: 'calai',
 
   /*
-   * Locked to light rather than 'automatic'.
-   *
-   * The palette is a warm paper-and-ink system. Dark mode is not an inversion of
-   * it — `paper` flipped to near-black loses the whole reason the palette reads
-   * as food rather than fitness, and the three macro hues need different
-   * lightness relationships against a dark ground to stay distinguishable.
-   * That is a real design pass, so it is a Phase 6 item. Shipping 'automatic'
-   * now would mean half the users seeing a broken-looking app.
+   * Locked to light rather than 'automatic'. Dark mode is a real design pass —
+   * the ring tracks, card shadows and macro hues all need re-tuning against a
+   * dark ground — and shipping 'automatic' before that pass means half the
+   * users see a broken-looking app.
    */
   userInterfaceStyle: 'light',
 
   android: {
     adaptiveIcon: {
-      backgroundColor: '#FBF8F3',
+      backgroundColor: '#F4F5F7',
       foregroundImage: './assets/images/android-icon-foreground.png',
       backgroundImage: './assets/images/android-icon-background.png',
       monochromeImage: './assets/images/android-icon-monochrome.png',
@@ -58,7 +54,7 @@ const config: ExpoConfig = {
       {
         // `paper`, so the splash is continuous with the app background instead of
         // flashing a different colour on launch.
-        backgroundColor: '#FBF8F3',
+        backgroundColor: '#F4F5F7',
         image: './assets/images/splash-icon.png',
         imageWidth: 76,
       },

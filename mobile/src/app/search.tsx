@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Food search.
  *
  * The input is debounced at 350ms. Without it, "chicken" fires seven requests —
@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: color.inkWash,
     borderLeftWidth: 3,
-    borderLeftColor: color.wheat,
+    borderLeftColor: color.carbs,
   },
   noticeText: { ...text.bodyMuted, fontSize: 13 },
 });

@@ -117,8 +117,8 @@ export default function OnboardingScreen() {
         goal,
         timezone: deviceTimezone(),
       });
-      // The home screen refetches on focus, so it will show the new targets.
-      router.replace('/');
+      // The dashboard refetches on focus, so it will show the new targets.
+      router.replace('/(tabs)/index');
     } catch (caught) {
       setError(
         caught instanceof ApiError ? caught.userMessage : 'Something went wrong. Try again.',

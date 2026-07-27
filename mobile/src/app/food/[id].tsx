@@ -39,6 +39,9 @@ export default function FoodDetailScreen() {
   const [grams, setGrams] = useState('100');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // The + button infers a slot from the time of day; this is where the user
+  // corrects it. State starts from the param and the chips below override.
+  const [chosenSlot, setChosenSlot] = useState<MealSlot>(slot ?? 'snack');
 
   useEffect(() => {
     let cancelled = false;
@@ -89,14 +92,14 @@ export default function FoodDetailScreen() {
     try {
       await logFood({
         foodId: food.id,
-        mealSlot: slot ?? 'snack',
+        mealSlot: chosenSlot,
         quantityGrams: quantity,
         localDate: day || undefined,
       });
-      // Back to the diary, which refetches on focus. dismissAll rather than
+      // Back to the dashboard, which refetches on focus. dismissAll rather than
       // back, so the search screen is not left behind on the stack.
       router.dismissAll();
-      router.replace('/diary');
+      router.replace('/(tabs)/index');
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.userMessage : 'Could not log this food.');
     } finally {
@@ -131,7 +134,7 @@ export default function FoodDetailScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={text.overline}>Add to {MEAL_LABELS[slot ?? 'snack']}</Text>
+        <Text style={text.overline}>Add to {MEAL_LABELS[chosenSlot]}</Text>
         <Text style={text.title}>{food.name}</Text>
         {food.brand && <Text style={[text.bodyMuted, styles.brand]}>{food.brand}</Text>}
 
@@ -143,6 +146,26 @@ export default function FoodDetailScreen() {
         </View>
 
         <MacroBar macros={scaled} scale="hero" showLegend />
+
+        <Text style={[text.overline, styles.sectionLabel]}>Meal</Text>
+        <View style={styles.slotRow}>
+          {(Object.keys(MEAL_LABELS) as MealSlot[]).map((option) => {
+            const selected = option === chosenSlot;
+            return (
+              <Pressable
+                key={option}
+                onPress={() => setChosenSlot(option)}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                style={[styles.slotChip, selected && styles.slotChipSelected]}
+              >
+                <Text style={[styles.slotChipLabel, selected && styles.slotChipLabelSelected]}>
+                  {MEAL_LABELS[option]}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <Text style={[text.overline, styles.sectionLabel]}>Quantity</Text>
         <TextField
@@ -245,6 +268,19 @@ const styles = StyleSheet.create({
   brand: { marginTop: space.xs },
   heroBlock: { marginTop: space.lg, marginBottom: space.lg },
   sectionLabel: { marginTop: space.xl, marginBottom: space.sm },
+  slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  slotChip: {
+    minHeight: HIT_SLOP_MIN - 8,
+    justifyContent: 'center',
+    paddingHorizontal: space.md,
+    borderRadius: radius.pill,
+    backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: color.hairline,
+  },
+  slotChipSelected: { backgroundColor: color.ink, borderColor: color.ink },
+  slotChipLabel: { ...text.label, fontSize: 13 },
+  slotChipLabelSelected: { color: color.onDark },
   portions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
   portion: {
     minHeight: HIT_SLOP_MIN,

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Request a password reset link.
  *
  * The success state deliberately does not confirm whether an account exists —
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: color.inkWash,
     borderLeftWidth: 3,
-    borderLeftColor: color.wheat,
+    borderLeftColor: color.carbs,
     gap: space.xs,
   },
   devTitle: { ...text.overline, color: color.inkMuted },

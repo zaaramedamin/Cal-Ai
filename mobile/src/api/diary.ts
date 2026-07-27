@@ -62,9 +62,12 @@ export interface DiaryEntry {
   local_date: string;
   meal_slot: MealSlot;
   food_id: string | null;
+  recipe_id: string | null;
   food_name: string;
   food_brand: string | null;
   quantity_grams: number;
+  /** Set only for recipe entries — what the user chose ("1.5 servings"). */
+  servings: number | null;
   kcal: number;
   protein_g: number;
   carbs_g: number;

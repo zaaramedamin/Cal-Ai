@@ -1,74 +1,63 @@
 /**
- * Design tokens.
+ * Design tokens — CalDiet-style system.
  *
- * Every colour, space and radius in the app comes from here. The rule is
- * absolute: no raw hex values and no magic numbers in component styles. That is
- * what makes a change to the system a one-line edit rather than a search across
- * fifty files, and it is why the app will look like one product instead of
- * fifty screens that were each styled on their own.
+ * The look: a cool light-gray canvas, white cards with soft shadows, black as
+ * the single action colour, and one accent per macro used for progress rings
+ * and bars. Numbers are the heroes; chrome stays quiet.
+ *
+ * Every colour, space and radius in the app comes from here. No raw hex values
+ * and no magic numbers in component styles — that rule is what keeps a redesign
+ * like this one a single-file palette change instead of a fifty-file hunt.
  */
 
-/**
- * The six brand colours.
- *
- * The palette deliberately rejects the fitness-app default of neon green on
- * black. CalAi is about food, so the base is warm — `paper` and `ink` read like
- * printed stock rather than a clinical dashboard — and the action colour is a
- * burnt orange that is appetising rather than sporty.
- *
- * The three macro hues separate on *lightness* as well as hue (plum dark, moss
- * mid, wheat light). That means they stay distinguishable in greyscale and under
- * deuteranopia, where three colours of equal lightness would collapse into one.
- */
+import { Platform, type ViewStyle } from 'react-native';
+
 const palette = {
-  /** Warm near-black. Text and dark surfaces. Warm rather than blue-black so it sits with `paper`. */
-  ink: '#1A1714',
-  /** Warm off-white. The app background. */
-  paper: '#FBF8F3',
-  /** Burnt orange. Primary action and brand. */
-  clay: '#C0562A',
-  /** Protein. */
-  moss: '#4F6F52',
-  /** Carbohydrate. */
-  wheat: '#D4A03C',
-  /** Fat. */
-  plum: '#7C4B6B',
+  /** App canvas. Cool light gray so white cards visibly lift off it. */
+  canvas: '#F4F5F7',
+  /** Cards and sheets. */
+  surface: '#FFFFFF',
+  /** Primary text and the action colour. Near-black, slightly warm. */
+  ink: '#17181A',
+  /** Protein ring and bar. Red-salmon. */
+  protein: '#E8564B',
+  /** Carbohydrate ring and bar. Amber. */
+  carbs: '#EFA036',
+  /** Fat ring and bar. Blue. */
+  fat: '#4C86E8',
+  /** The streak flame and calorie accents. */
+  flame: '#F2762E',
 } as const;
 
-/** `ink` as an rgb triple, so neutrals can be derived as opacities of it. */
-const INK_RGB = '26, 23, 20';
+const INK_RGB = '23, 24, 26';
 
 export const color = {
   ...palette,
 
-  /**
-   * Neutrals are `ink` at fixed opacities rather than additional hex values.
-   * Six greys picked by eye would drift out of tune with the warm base; opacities
-   * of the text colour stay in tune by construction.
-   */
-  inkMuted: `rgba(${INK_RGB}, 0.64)`,
-  inkFaint: `rgba(${INK_RGB}, 0.40)`,
-  hairline: `rgba(${INK_RGB}, 0.10)`,
-  inkWash: `rgba(${INK_RGB}, 0.04)`,
+  /** Secondary text: timestamps, units, helper copy. */
+  inkMuted: `rgba(${INK_RGB}, 0.55)`,
+  /** Tertiary text and disabled icons. */
+  inkFaint: `rgba(${INK_RGB}, 0.32)`,
+  /** Hairline separators on white. */
+  hairline: `rgba(${INK_RGB}, 0.08)`,
+  /** Pressed/selected wash and empty ring tracks on white cards. */
+  wash: `rgba(${INK_RGB}, 0.06)`,
 
-  /** Cards and sheets: a half-step lighter than `paper` so they lift without a shadow. */
-  surface: '#FFFDFA',
+  /** Text and icons on `ink` (buttons) and on macro colours. */
+  onDark: '#FFFFFF',
 
-  /**
-   * A darkened shade of `clay`, not a seventh brand colour. Used for pressed
-   * states and for error accents. Reusing the accent hue for errors keeps the
-   * palette tight; the darker value is what separates "danger" from "action".
-   */
-  clayDeep: '#8E3D1B',
+  /** Success/positive (weight trending toward goal). */
+  positive: '#3BA55D',
+  /** Errors and destructive actions. */
+  danger: '#D64545',
 
-  /** Text and icons on top of `clay` or `ink`. */
-  onDark: '#FBF8F3',
+  // Back-compat aliases used by the auth/onboarding screens' error callouts.
+  clay: '#17181A',
+  clayDeep: '#D64545',
+  inkWash: `rgba(${INK_RGB}, 0.06)`,
+  paper: '#F4F5F7',
 } as const;
 
-/**
- * Spacing scale. Multiples of 4 with a 12 inserted, because 8 -> 16 is too big a
- * jump for the gap between a label and its value.
- */
 export const space = {
   xs: 4,
   sm: 8,
@@ -80,19 +69,33 @@ export const space = {
 } as const;
 
 /**
- * Radius scale. Kept tighter than the current app-design fashion: this is a
- * dense, information-first app, and heavily rounded cards waste horizontal space
- * and make list rows read as loose.
+ * Generous radii are half the look. Cards at 20, buttons and inputs at 14,
+ * chips at pill.
  */
 export const radius = {
-  sm: 6,
-  md: 10,
-  lg: 16,
-  xl: 24,
+  sm: 10,
+  md: 14,
+  lg: 20,
+  xl: 28,
   pill: 999,
 } as const;
 
-/** Minimum touch target. Below this, taps start missing — non-negotiable, not a style choice. */
+/**
+ * The soft card shadow. Defined once because iOS and Android disagree about
+ * everything here: iOS wants shadow* properties, Android wants elevation, and
+ * mixing them per-screen produces cards that match on one platform only.
+ */
+export const cardShadow: ViewStyle = Platform.select({
+  ios: {
+    shadowColor: '#101215',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+  },
+  default: { elevation: 2 },
+});
+
+/** Minimum touch target. Below this, taps start missing. */
 export const HIT_SLOP_MIN = 44;
 
 export type SpaceToken = keyof typeof space;

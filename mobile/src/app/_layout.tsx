@@ -53,7 +53,9 @@ function useProtectedRoute() {
     } else if (status === 'authenticated' && inAuthGroup) {
       // `replace`, not `push`: the login screen must not remain on the back
       // stack, or Android's back gesture returns to it after signing in.
-      router.replace('/');
+      // The literal '/(tabs)/index' rather than '/': SDK 54's typed-route
+      // generator names a group index that way and does not emit '/'.
+      router.replace('/(tabs)/index');
     }
   }, [status, segments, router]);
 }
