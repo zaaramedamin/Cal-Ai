@@ -34,6 +34,10 @@ dependencies = [
     # and every lookup silently falls back to UTC. That would put late-evening
     # diary entries on the wrong day, on the platform this is developed on.
     "tzdata>=2025.1",
+    # --- Phase 3: nutrition data sources ---
+    # Async HTTP for the USDA proxy. Note this is httpx, not the httpx2 in dev
+    # dependencies — that one exists solely as Starlette's test transport.
+    "httpx>=0.28",
 ]
 
 [project.optional-dependencies]

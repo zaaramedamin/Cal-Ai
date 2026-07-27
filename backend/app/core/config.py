@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     # client forge its address and bypass every per-IP limit.
     trust_proxy_headers: bool = False
 
+    # ---- Nutrition data sources -------------------------------------------
+    # DEMO_KEY works but allows only 30 requests an hour, which the search screen
+    # exhausts almost immediately. A real key is free.
+    usda_api_key: str = "DEMO_KEY"
+    off_user_agent: str = "CalAi/0.1 (contact@example.com)"
+
     @field_validator("secret_key")
     @classmethod
     def _reject_placeholder_secret(cls, value: str) -> str:
