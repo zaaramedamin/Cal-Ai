@@ -133,45 +133,108 @@ def test_food_without_a_description_is_rejected() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_branded_food_is_scaled_to_per_100g() -> None:
-    """The trap that produces a silent 45% error.
+def test_branded_food_nutrients_are_never_scaled() -> None:
+    """Regression test for a bug that live data caught and a unit test did not.
 
-    A branded cereal reporting 200 kcal per 55 g serving is 363.6 kcal per 100 g.
-    Storing 200 unscaled would make every logged portion badly wrong, with
-    nothing to indicate it.
+    `foodNutrients` is per 100 g for *every* data type — USDA normalises it,
+    Branded included. An earlier version scaled it by serving size on the
+    assumption that Branded was per serving, which turned an 89 kcal banana with
+    a 32 g serving into 975 kcal.
+
+    The original test asserted that same wrong assumption, so it passed happily
+    while the code was wrong. Only a real API response exposed it.
+    """
+    food = normalise_food(
+        payload(
+            dataType="Branded",
+            servingSize=32,
+            servingSizeUnit="g",
+            brandOwner="Some Fruit Co",
+            foodNutrients=[
+                {"nutrientId": 1008, "nutrientNumber": "208", "value": 89.0},
+                {"nutrientId": 1003, "nutrientNumber": "203", "value": 1.09},
+                {"nutrientId": 1005, "nutrientNumber": "205", "value": 22.84},
+                {"nutrientId": 1004, "nutrientNumber": "204", "value": 0.33},
+            ],
+        )
+    )
+    assert food["kcal"] == 89.0, "per-100g values must pass through untouched"
+    assert food["protein_g"] == 1.09
+    assert food["brand"] == "Some Fruit Co"
+
+
+def test_search_results_use_legacy_nutrient_numbers() -> None:
+    """The other half of the same bug.
+
+    `/foods/search` returns `nutrientNumber` as the legacy INFOODS tagname —
+    protein is 203 there and 1003 in detail responses. Reading only
+    `nutrientNumber` matched nothing, so every search result was rejected as
+    having no energy, which looked like bad data from USDA rather than our bug.
+    """
+    food = normalise_food(
+        payload(
+            foodNutrients=[
+                {"nutrientId": 1008, "nutrientNumber": "208", "value": 312.0},
+                {"nutrientId": 1003, "nutrientNumber": "203", "value": 12.5},
+                {"nutrientId": 1005, "nutrientNumber": "205", "value": 50.0},
+                {"nutrientId": 1004, "nutrientNumber": "204", "value": 10.0},
+            ]
+        )
+    )
+    assert food["kcal"] == 312.0
+    assert food["protein_g"] == 12.5
+
+
+def test_label_nutrients_fill_gaps_and_are_scaled_to_per_100g() -> None:
+    """`labelNutrients` IS per serving, and is the only thing scaled.
+
+    200 kcal per 55 g serving is 363.64 per 100 g. Used only when
+    `foodNutrients` lacks the value, since USDA's own per-100 g figure is more
+    trustworthy than one derived from a rounded label.
     """
     food = normalise_food(
         payload(
             dataType="Branded",
             servingSize=55,
             servingSizeUnit="g",
-            brandOwner="Some Cereal Co",
-            foodNutrients=[
-                {"nutrient": {"number": "1008"}, "amount": 200.0},
-                {"nutrient": {"number": "1003"}, "amount": 5.0},
-                {"nutrient": {"number": "1005"}, "amount": 40.0},
-                {"nutrient": {"number": "1004"}, "amount": 2.0},
-            ],
+            foodNutrients=[],
+            labelNutrients={
+                "calories": {"value": 200.0},
+                "protein": {"value": 5.0},
+                "carbohydrates": {"value": 40.0},
+                "fat": {"value": 2.0},
+            },
         )
     )
     assert food["kcal"] == pytest.approx(363.64, abs=0.01)
     assert food["protein_g"] == pytest.approx(9.09, abs=0.01)
-    assert food["brand"] == "Some Cereal Co"
 
 
-def test_foundation_food_is_not_scaled() -> None:
-    """Curated data types are already per 100 g. Scaling them would break them."""
-    food = normalise_food(payload(servingSize=55, servingSizeUnit="g"))
-    assert food["kcal"] == 89.0
-
-
-def test_branded_food_without_a_usable_serving_size_is_left_alone() -> None:
-    """A serving in 'cups' cannot be converted without a density, so we do not
-    guess — the per-serving numbers are stored as-is rather than mangled."""
+def test_food_nutrients_win_over_label_nutrients() -> None:
     food = normalise_food(
-        payload(dataType="Branded", servingSize=1, servingSizeUnit="cup")
+        payload(
+            dataType="Branded",
+            servingSize=55,
+            servingSizeUnit="g",
+            labelNutrients={"calories": {"value": 200.0}},
+        )
     )
     assert food["kcal"] == 89.0
+
+
+def test_label_nutrients_are_ignored_without_a_convertible_serving() -> None:
+    """A serving in cups cannot be converted without a density, and guessing one
+    would be inventing data."""
+    with pytest.raises(UnusableFood, match="energy"):
+        normalise_food(
+            payload(
+                dataType="Branded",
+                servingSize=1,
+                servingSizeUnit="cup",
+                foodNutrients=[],
+                labelNutrients={"calories": {"value": 200.0}},
+            )
+        )
 
 
 # --------------------------------------------------------------------------- #

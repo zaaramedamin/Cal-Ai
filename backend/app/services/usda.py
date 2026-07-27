@@ -64,12 +64,24 @@ class UnusableFood(ValueError):
 
 
 def _index_nutrients(payload: dict[str, Any]) -> dict[str, float]:
-    """Flatten `foodNutrients` into {nutrient number: amount}.
+    """Flatten `foodNutrients` into {identifier: amount}, under every identifier present.
 
-    USDA returns at least three shapes for this array depending on endpoint and
-    data type — nested under `nutrient`, flattened with `nutrientNumber`, or
-    abbreviated in search results. Handling all three here keeps the mess in one
-    place instead of at every call site.
+    USDA uses **two different numbering systems**, and which one you get depends
+    on the endpoint. This cost real debugging time, so it is worth stating
+    plainly:
+
+    * `/food/{id}` nests the modern number: `{"nutrient": {"number": "1008"}}`.
+    * `/foods/search` returns `nutrientId: 1008` *and* `nutrientNumber: "203"` —
+      where `nutrientNumber` is the **legacy INFOODS tagname**, not the modern
+      number. Protein is 203 there and 1003 here.
+
+    Reading `nutrientNumber` alone therefore matches nothing for search results,
+    and every food is rejected as having no energy — which looks exactly like
+    USDA returning bad data rather than like our bug.
+
+    Indexing under every identifier the entry carries makes lookups by modern
+    number work regardless of shape. Legacy numbers are three digits and modern
+    ones four, so the two cannot collide.
     """
     indexed: dict[str, float] = {}
 
@@ -77,19 +89,27 @@ def _index_nutrients(payload: dict[str, Any]) -> dict[str, float]:
         if not isinstance(entry, dict):
             continue
 
-        number = (
-            (entry.get("nutrient") or {}).get("number")
-            or entry.get("nutrientNumber")
-            or entry.get("number")
-        )
+        nested = entry.get("nutrient") or {}
         amount = entry.get("amount") if entry.get("amount") is not None else entry.get("value")
-
-        if number is None or amount is None:
+        if amount is None:
             continue
+
         try:
-            indexed[str(number)] = float(amount)
+            value = float(amount)
         except (TypeError, ValueError):
             continue
+
+        for identifier in (
+            nested.get("number"),
+            nested.get("id"),
+            entry.get("nutrientId"),
+            entry.get("nutrientNumber"),
+            entry.get("number"),
+        ):
+            if identifier is not None:
+                # setdefault: the first shape encountered wins, so a nested
+                # modern number is never overwritten by a legacy alias.
+                indexed.setdefault(str(identifier), value)
 
     return indexed
 
@@ -119,27 +139,75 @@ def _resolve_energy(nutrients: dict[str, float]) -> float | None:
 
 
 def _serving_scale_factor(payload: dict[str, Any]) -> float:
-    """Multiplier converting the payload's basis to per-100 g.
+    """Multiplier converting a *per-serving* figure to per 100 g.
 
-    Foundation and SR Legacy are already per 100 g, so this is 1.0.
-
-    Branded foods are the trap: `labelNutrients` are per serving, and
-    `servingSize` might be 55 g. Storing those numbers unscaled would make a
-    55 g portion of cereal report as if it were 100 g — a 45% error, silently.
+    Only ever applied to `labelNutrients`. See `_label_nutrients` for why
+    `foodNutrients` must NOT be scaled.
     """
     serving_size = payload.get("servingSize")
     unit = (payload.get("servingSizeUnit") or "").lower()
 
-    if not serving_size or unit not in {"g", "ml", "grm"}:
-        return 1.0
+    if not serving_size or unit not in {"g", "ml", "grm", "mlt"}:
+        return 0.0
     try:
         size = float(serving_size)
     except (TypeError, ValueError):
-        return 1.0
+        return 0.0
 
     if size <= 0:
-        return 1.0
+        return 0.0
     return 100.0 / size
+
+
+#: `labelNutrients` uses its own key names rather than nutrient numbers.
+LABEL_KEYS = {
+    NUTRIENT_ENERGY_KCAL: "calories",
+    NUTRIENT_PROTEIN: "protein",
+    NUTRIENT_FAT: "fat",
+    NUTRIENT_CARBS: "carbohydrates",
+    NUTRIENT_SUGARS: "sugars",
+    NUTRIENT_FIBRE: "fiber",
+    NUTRIENT_SATURATED_FAT: "saturatedFat",
+    NUTRIENT_SODIUM: "sodium",
+}
+
+
+def _label_nutrients(payload: dict[str, Any]) -> dict[str, float]:
+    """Per-100 g values derived from a Branded food's nutrition label.
+
+    **The distinction that matters, and that cost real debugging time.**
+
+    `foodNutrients` is per 100 g for *every* data type, Branded included — USDA
+    normalises it for us. Scaling it by serving size double-counts: a 32 g
+    serving turned an 89 kcal banana into 975 kcal, a number that is obviously
+    wrong on sight and would have been quietly wrong in a total.
+
+    `labelNutrients` is the one that is per serving, and it appears only on
+    detail responses. So it is the only thing scaled here, and it is used only
+    as a fallback when `foodNutrients` lacks what we need.
+    """
+    label = payload.get("labelNutrients")
+    if not isinstance(label, dict):
+        return {}
+
+    scale = _serving_scale_factor(payload)
+    if scale <= 0:
+        # A serving measured in cups cannot be converted without a density.
+        # Guessing one would be inventing data.
+        return {}
+
+    derived: dict[str, float] = {}
+    for number, key in LABEL_KEYS.items():
+        entry = label.get(key)
+        value = entry.get("value") if isinstance(entry, dict) else None
+        if value is None:
+            continue
+        try:
+            derived[number] = float(value) * scale
+        except (TypeError, ValueError):
+            continue
+
+    return derived
 
 
 def normalise_food(payload: dict[str, Any]) -> dict[str, Any]:
@@ -155,11 +223,13 @@ def normalise_food(payload: dict[str, Any]) -> dict[str, Any]:
     if not description:
         raise UnusableFood(f"Food {fdc_id} has no description.")
 
+    # `foodNutrients` is per 100 g for every data type and is never scaled.
+    # `labelNutrients` fills gaps for Branded foods and *is* scaled, inside
+    # _label_nutrients. Values already present win — USDA's own per-100 g figure
+    # is more trustworthy than one we derived from a rounded label.
     nutrients = _index_nutrients(payload)
-    data_type = payload.get("dataType") or ""
-
-    # Branded foods report per serving; curated data types are already per 100 g.
-    scale = _serving_scale_factor(payload) if data_type == "Branded" else 1.0
+    for number, value in _label_nutrients(payload).items():
+        nutrients.setdefault(number, value)
 
     energy = _resolve_energy(nutrients)
     if energy is None:
@@ -168,20 +238,20 @@ def normalise_food(payload: dict[str, Any]) -> dict[str, Any]:
     def optional(key: str) -> float | None:
         """None stays None. It means 'the source did not say', not 'zero'."""
         value = nutrients.get(key)
-        return round(value * scale, 2) if value is not None else None
+        return round(value, 2) if value is not None else None
 
     def required(key: str) -> float:
         value = nutrients.get(key)
         if value is None:
             raise UnusableFood(f"Food {fdc_id} is missing nutrient {key}.")
-        return round(value * scale, 2)
+        return round(value, 2)
 
     return {
         "source": "usda",
         "source_id": str(fdc_id),
         "name": description,
         "brand": (payload.get("brandOwner") or payload.get("brandName") or None),
-        "kcal": round(energy * scale, 2),
+        "kcal": round(energy, 2),
         "protein_g": required(NUTRIENT_PROTEIN),
         "carbs_g": required(NUTRIENT_CARBS),
         "fat_g": required(NUTRIENT_FAT),
@@ -266,9 +336,13 @@ class UsdaClient:
                 "dataType": list(DEFAULT_DATA_TYPES),
                 "pageSize": min(page_size, 50),
                 # Curated entries before branded ones: someone searching "banana"
-                # wants the fruit, not a banana-flavoured protein bar.
+                # wants the fruit, not banana-flavoured syrup.
+                #
+                # Descending, not ascending. The values sort alphabetically as
+                # Branded < Foundation < SR Legacy, so ascending puts packaged
+                # products first — the exact opposite of what is wanted.
                 "sortBy": "dataType.keyword",
-                "sortOrder": "asc",
+                "sortOrder": "desc",
             },
         )
         return payload.get("foods") or []
