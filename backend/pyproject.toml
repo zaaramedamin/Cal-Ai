@@ -8,10 +8,9 @@ version = "0.1.0"
 description = "CalAi backend — calorie and macronutrient tracking API"
 requires-python = ">=3.13"
 
-# Phase 0 dependencies only. Auth libraries land in Phase 1, HTTP clients for
-# USDA/Open Food Facts in Phase 3. Keeping this list equal to what the code
-# actually imports means it stays a truthful description of the app rather than
-# a pile of things we might one day use.
+# HTTP clients for USDA/Open Food Facts land in Phase 3. Keeping this list equal
+# to what the code actually imports means it stays a truthful description of the
+# app rather than a pile of things we might one day use.
 dependencies = [
     "fastapi>=0.136",
     "uvicorn[standard]>=0.35",
@@ -19,6 +18,17 @@ dependencies = [
     "asyncpg>=0.30",
     "alembic>=1.14",
     "pydantic-settings>=2.7",
+    # --- Phase 1: auth ---
+    # argon2-cffi directly rather than passlib: passlib has been effectively
+    # unmaintained since 2020 and its bcrypt backend breaks against modern bcrypt
+    # releases. This is the reference implementation from the Argon2 authors.
+    "argon2-cffi>=23.1",
+    # PyJWT rather than python-jose. python-jose has had unpatched CVEs and
+    # carries a much larger surface (JWE, JWK, full JOSE); we sign and verify one
+    # token type with one algorithm, and PyJWT does exactly that.
+    "pyjwt>=2.10",
+    # Backs Pydantic's EmailStr. Validates syntax and normalises the domain.
+    "email-validator>=2.2",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +51,10 @@ packages = ["app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Each test gets its own event loop. Stated explicitly rather than left to the
+# default, because it is the reason the test engine must disable pooling — an
+# asyncpg connection belongs to the loop that opened it. See tests/conftest.py.
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100

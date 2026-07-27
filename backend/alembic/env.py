@@ -24,14 +24,13 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
+# Importing the models package registers every table on Base.metadata before
+# autogenerate compares it against the live database. Without this import,
+# autogenerate sees no tables and cheerfully generates a migration that drops
+# every table it cannot account for.
+import app.db.models  # noqa: F401
 from app.core.config import get_settings
 from app.db.base import Base
-
-# Phase 1 onwards: import the models package here so that defining a model class
-# registers its table on Base.metadata before autogenerate compares it against
-# the live database. Without the import, autogenerate sees no tables and
-# cheerfully generates a migration that drops everything.
-#   import app.db.models  # noqa: F401
 
 config = context.config
 

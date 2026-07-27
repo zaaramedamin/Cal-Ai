@@ -46,6 +46,39 @@ class Settings(BaseSettings):
 
     database_url: str
 
+    # ---- Auth -------------------------------------------------------------
+    # Signs access tokens. Rotating it invalidates every issued token at once,
+    # which is the intended panic button if one ever leaks.
+    secret_key: str
+
+    # Deliberately short. An access token cannot be revoked — anyone holding it
+    # is authenticated until it expires, because verifying it involves no
+    # database lookup at all (that is the whole point of a JWT). The only real
+    # control over a stolen one is that it stops working quickly.
+    access_token_expire_minutes: int = 15
+
+    # Long, because this is what saves the user from logging in every 15 minutes.
+    # Safe to be long *because* it is revocable: it lives in the database, and
+    # logout deletes it.
+    refresh_token_expire_days: int = 30
+
+    @field_validator("secret_key")
+    @classmethod
+    def _reject_placeholder_secret(cls, value: str) -> str:
+        """Refuse to start on the committed placeholder or an obviously weak key.
+
+        The failure this prevents is quiet and serious: shipping with the
+        .env.example value means anyone who has read the repo can forge tokens
+        for any user. A crash on boot is a good trade for that.
+        """
+        if "replace-me" in value or len(value) < 32:
+            raise ValueError(
+                "SECRET_KEY must be a real random value of at least 32 characters. "
+                'Generate one with: python -c "import secrets; '
+                "print(secrets.token_urlsafe(64))\""
+            )
+        return value
+
     @field_validator("database_url")
     @classmethod
     def _require_async_driver(cls, value: str) -> str:
