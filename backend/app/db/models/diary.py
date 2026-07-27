@@ -91,9 +91,21 @@ class DiaryEntry(UUIDPrimaryKey, TimestampedCreation, Base):
     food_id: Mapped[uuid.UUID | None] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("foods.id", ondelete="SET NULL"), nullable=True
     )
-    recipe_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True)
+    # SET NULL for the same reason as food_id: deleting a recipe must not erase
+    # the history of having eaten it. The snapshot keeps the entry whole.
+    recipe_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("recipes.id", ondelete="SET NULL"), nullable=True
+    )
 
+    #: Always populated, for foods and recipes alike. For a recipe it is the
+    #: total ingredient weight scaled to the servings logged, so a day's grams
+    #: stay comparable and summable regardless of how the entry was created.
     quantity_grams: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
+
+    #: Set only for recipe entries — what the user actually chose ("1.5
+    #: servings"). Kept alongside the grams because "180 g of chilli" is not how
+    #: anyone thinks about a portion they served themselves.
+    servings: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True, default=None)
 
     #: Copied at log time so the row survives the food changing or vanishing.
     food_name: Mapped[str] = mapped_column(String(255), nullable=False)

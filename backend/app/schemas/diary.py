@@ -30,9 +30,14 @@ class DiaryEntryRead(BaseModel):
     local_date: date
     meal_slot: MealSlot
     food_id: uuid.UUID | None
+    recipe_id: uuid.UUID | None
     food_name: str
     food_brand: str | None
     quantity_grams: float
+    #: Set only for recipe entries. The app shows "1.5 servings" rather than the
+    #: gram weight, because that is how someone thinks about a portion they
+    #: served themselves.
+    servings: float | None
 
     kcal: float
     protein_g: float

@@ -12,6 +12,7 @@ the table, because as far as it can tell the table should not exist.
 from app.db.models.diary import DiaryEntry, MealSlot
 from app.db.models.food import Food, FoodPortion, FoodSource
 from app.db.models.profile import UserProfile, WeightEntry
+from app.db.models.recipe import Recipe, RecipeIngredient
 from app.db.models.user import PasswordResetToken, RefreshToken, RevocationReason, User
 
 __all__ = [
@@ -21,6 +22,8 @@ __all__ = [
     "FoodSource",
     "MealSlot",
     "PasswordResetToken",
+    "Recipe",
+    "RecipeIngredient",
     "RefreshToken",
     "RevocationReason",
     "User",

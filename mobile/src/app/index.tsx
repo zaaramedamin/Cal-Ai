@@ -137,6 +137,7 @@ export default function HomeScreen() {
 
         <View style={styles.actions}>
           <Button label="Open today's diary" onPress={() => router.push('/diary')} />
+          <Button label="My recipes" onPress={() => router.push('/recipes')} />
           <Button label="Edit my details" onPress={() => router.push('/onboarding')} />
           <Pressable
             onPress={() => void signOut()}

@@ -23,6 +23,7 @@ import { MEAL_LABELS, type FoodSearchResult, type MealSlot, searchFoods } from '
 import { MacroBar } from '@/components/macro-bar';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { draftActions } from '@/features/recipes/draft-store';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -37,7 +38,13 @@ type State =
 
 export default function SearchScreen() {
   const router = useRouter();
-  const { slot, day } = useLocalSearchParams<{ slot?: MealSlot; day?: string }>();
+  const { slot, day, mode } = useLocalSearchParams<{
+    slot?: MealSlot;
+    day?: string;
+    /** 'recipe' adds the chosen food to the recipe draft instead of the diary. */
+    mode?: string;
+  }>();
+  const pickingIngredient = mode === 'recipe';
 
   const [query, setQuery] = useState('');
   const [state, setState] = useState<State>({ kind: 'idle' });
@@ -84,7 +91,11 @@ export default function SearchScreen() {
     <Screen>
       <View style={styles.header}>
         <Text style={text.overline}>
-          {slot ? `Add to ${MEAL_LABELS[slot]}` : 'Search foods'}
+          {pickingIngredient
+            ? 'Add ingredient'
+            : slot
+              ? `Add to ${MEAL_LABELS[slot]}`
+              : 'Search foods'}
         </Text>
         <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancel}>
           <Text style={styles.cancelLabel}>Cancel</Text>
@@ -151,12 +162,30 @@ export default function SearchScreen() {
               contentContainerStyle={styles.list}
               renderItem={({ item }) => (
                 <Pressable
-                  onPress={() =>
+                  onPress={() => {
+                    if (pickingIngredient) {
+                      // Straight into the draft at a sensible default, and back.
+                      // Sending the cook through the portion screen for every
+                      // ingredient would make building a ten-item recipe twenty
+                      // taps; the quantity is editable inline in the builder.
+                      draftActions.addIngredient({
+                        foodId: item.id,
+                        name: item.name,
+                        brand: item.brand,
+                        grams: 100,
+                        kcal: item.kcal,
+                        protein_g: item.protein_g,
+                        carbs_g: item.carbs_g,
+                        fat_g: item.fat_g,
+                      });
+                      router.back();
+                      return;
+                    }
                     router.push({
                       pathname: '/food/[id]',
                       params: { id: item.id, slot: slot ?? 'snack', day: day ?? '' },
-                    })
-                  }
+                    });
+                  }}
                   accessibilityRole="button"
                   style={styles.row}
                 >
