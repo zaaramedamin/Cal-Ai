@@ -11,7 +11,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 
 import { ApiError } from '@/api/client';
 import { logWeight } from '@/api/profile';
@@ -20,6 +19,7 @@ import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { TrendChart } from '@/components/trend-chart';
 import { color, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
@@ -125,7 +125,10 @@ export default function ProgressScreen() {
                 </Text>
               )}
 
-            <WeightChart points={state.progress.weight_series.map((p) => p.weight_kg)} />
+            <TrendChart
+              values={state.progress.weight_series.map((p) => p.weight_kg)}
+              target={state.progress.target_weight_kg}
+            />
 
             <View style={styles.weightForm}>
               <View style={styles.weightField}>
@@ -177,52 +180,14 @@ export default function ProgressScreen() {
                 avg {Math.round(state.progress.weekly_average_kcal).toLocaleString()} kcal
               </Text>
             </View>
-            <WeekBars days={state.progress.last_7_days.map((d) => d.kcal)} />
+            <WeekBars
+              days={state.progress.last_7_days.map((d) => d.kcal)}
+              target={state.progress.target_calories || null}
+            />
           </Card>
         </ScrollView>
       )}
     </Screen>
-  );
-}
-
-/** One polyline over a soft gradient — the whole chart. */
-function WeightChart({ points }: { points: number[] }) {
-  const WIDTH = 280;
-  const HEIGHT = 90;
-
-  if (points.length < 2) {
-    return (
-      <Text style={styles.chartEmpty}>
-        Log your weight a few times and the trend appears here.
-      </Text>
-    );
-  }
-
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  // A flat line at mid-height when every reading is identical; a padded range
-  // otherwise so the line never touches the card edges.
-  const span = max - min || 1;
-  const step = WIDTH / (points.length - 1);
-
-  const coords = points.map((value, index) => ({
-    x: index * step,
-    y: 8 + (HEIGHT - 16) * (1 - (value - min) / span),
-  }));
-  const line = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-  const area = `${line} L${WIDTH},${HEIGHT} L0,${HEIGHT} Z`;
-
-  return (
-    <Svg width="100%" height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`}>
-      <Defs>
-        <LinearGradient id="weightFill" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={color.ink} stopOpacity="0.12" />
-          <Stop offset="1" stopColor={color.ink} stopOpacity="0" />
-        </LinearGradient>
-      </Defs>
-      <Path d={area} fill="url(#weightFill)" />
-      <Path d={line} stroke={color.ink} strokeWidth={2.5} fill="none" strokeLinecap="round" />
-    </Svg>
   );
 }
 
@@ -260,33 +225,60 @@ function BmiScale({ bmi }: { bmi: number }) {
   );
 }
 
-/** Seven bars, tallest = biggest day. Zero-days render a stub so the week keeps
- * its shape. */
-function WeekBars({ days }: { days: number[] }) {
-  const max = Math.max(...days, 1);
+/**
+ * Seven bars with the daily target drawn across them.
+ *
+ * The target line is what turns this from a picture into an answer. Bar heights
+ * alone say "Tuesday was the big day"; the line says whether Tuesday was over
+ * budget, which is the question someone actually opens this card to ask. Bars
+ * are tinted by which side of it they land on.
+ *
+ * Zero-days render a stub rather than nothing, so an unlogged day is visibly a
+ * gap in the week instead of a day that silently disappears.
+ */
+function WeekBars({ days, target }: { days: number[]; target: number | null }) {
   const LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   const today = new Date().getDay();
 
+  // The scale has to include the target, or a week spent under it would push the
+  // line off the top of the card and hide the very comparison being made.
+  const max = Math.max(...days, target ?? 0, 1) * 1.1;
+  const targetPercent = target ? (target / max) * 100 : null;
+
   return (
-    <View style={styles.weekRow}>
-      {days.map((kcal, index) => {
-        // days[] ends today; work each bar's weekday backwards from that.
-        const weekday = (today - (days.length - 1 - index) + 7) % 7;
-        return (
-          <View key={index} style={styles.weekBarSlot}>
-            <View style={styles.weekBarTrack}>
-              <View
-                style={[
-                  styles.weekBarFill,
-                  { height: `${Math.max(4, (kcal / max) * 100)}%` },
-                  kcal === 0 && styles.weekBarEmpty,
-                ]}
-              />
-            </View>
-            <Text style={styles.weekBarLabel}>{LETTERS[weekday]}</Text>
+    <View>
+      <View style={styles.weekRow}>
+        {targetPercent !== null && (
+          <View pointerEvents="none" style={[styles.targetLine, { bottom: `${targetPercent}%` }]}>
+            <View style={styles.targetDash} />
           </View>
-        );
-      })}
+        )}
+        {days.map((kcal, index) => {
+          // days[] ends today; work each bar's weekday backwards from that.
+          const weekday = (today - (days.length - 1 - index) + 7) % 7;
+          const over = target !== null && kcal > target;
+          return (
+            <View key={index} style={styles.weekBarSlot}>
+              <View style={styles.weekBarTrack}>
+                <View
+                  style={[
+                    styles.weekBarFill,
+                    { height: `${Math.max(4, (kcal / max) * 100)}%` },
+                    over && styles.weekBarOver,
+                    kcal === 0 && styles.weekBarEmpty,
+                  ]}
+                />
+              </View>
+              <Text style={styles.weekBarLabel}>{LETTERS[weekday]}</Text>
+            </View>
+          );
+        })}
+      </View>
+      {target !== null && (
+        <Text style={styles.targetCaption}>
+          Dashed line: your {Math.round(target).toLocaleString()} kcal target
+        </Text>
+      )}
     </View>
   );
 }
@@ -316,7 +308,6 @@ const styles = StyleSheet.create({
     marginBottom: space.sm,
   },
   goalLine: { fontSize: 13, marginBottom: space.md },
-  chartEmpty: { ...text.bodyMuted, fontSize: 13, paddingVertical: space.lg },
   weightForm: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -346,7 +337,17 @@ const styles = StyleSheet.create({
   bmiCaveat: { ...text.bodyMuted, fontSize: 12, lineHeight: 17 },
 
   weekAvg: { fontSize: 13 },
-  weekRow: { flexDirection: 'row', gap: space.sm, height: 96 },
+  weekRow: { flexDirection: 'row', gap: space.sm, height: 96, position: 'relative' },
+  // Sits above the bars but below the labels, spanning the full row so the
+  // comparison reads across the whole week rather than bar by bar.
+  targetLine: { position: 'absolute', left: 0, right: 0, marginBottom: 18, zIndex: 1 },
+  targetDash: {
+    height: 0,
+    borderTopWidth: 1.5,
+    borderStyle: 'dashed',
+    borderTopColor: color.inkMuted,
+  },
+  targetCaption: { ...text.bodyMuted, fontSize: 11, marginTop: space.sm },
   weekBarSlot: { flex: 1, alignItems: 'center', gap: space.xs },
   weekBarTrack: { flex: 1, width: 14, justifyContent: 'flex-end' },
   weekBarFill: {
@@ -354,6 +355,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: color.ink,
   },
+  weekBarOver: { backgroundColor: color.carbs },
   weekBarEmpty: { backgroundColor: color.wash },
   weekBarLabel: { ...text.overline, fontSize: 10 },
 });

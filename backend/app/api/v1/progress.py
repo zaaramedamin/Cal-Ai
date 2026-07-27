@@ -14,6 +14,7 @@ from sqlalchemy import Date as SaDate
 from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.profile import _targets_for
 from app.core.dates import local_today
 from app.core.deps import CurrentUser
 from app.db.models.diary import DiaryEntry
@@ -45,6 +46,13 @@ class ProgressRead(BaseModel):
 
     last_7_days: list[DayCalories]
     weekly_average_kcal: float
+    #: The daily calorie target, so the week chart can draw the line the bars are
+    #: measured against. Without it the chart shows which day was biggest but not
+    #: which days were over budget — the question the card exists to answer.
+    #: Computed here rather than fetched separately by the client, because it is
+    #: the same derivation the dashboard uses and two call sites is two chances
+    #: to disagree.
+    target_calories: int
 
     current_weight_kg: float | None
     target_weight_kg: float | None
@@ -158,11 +166,17 @@ async def read_progress(user: CurrentUser, session: SessionDep) -> ProgressRead:
     if current is not None:
         bmi, category = bmi_of(float(current), float(profile.height_cm))
 
+    # The same helper the diary and profile endpoints use, so the line drawn
+    # across the week chart is by construction the number the dashboard counts
+    # against. Recomputing it locally would be a second definition to keep true.
+    targets = _targets_for(profile, float(current)) if current is not None else None
+
     return ProgressRead(
         streak_days=streak,
         logged_today=logged_today,
         last_7_days=last_7,
         weekly_average_kcal=weekly_average,
+        target_calories=targets.calories if targets else 0,
         current_weight_kg=float(current) if current is not None else None,
         target_weight_kg=(
             float(profile.target_weight_kg) if profile.target_weight_kg is not None else None

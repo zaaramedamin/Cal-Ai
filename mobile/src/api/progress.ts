@@ -19,6 +19,8 @@ export interface Progress {
   logged_today: boolean;
   last_7_days: DayCalories[];
   weekly_average_kcal: number;
+  /** Daily target the week chart draws its reference line at. 0 before any weigh-in. */
+  target_calories: number;
   current_weight_kg: number | null;
   target_weight_kg: number | null;
   weight_series: WeightPoint[];
