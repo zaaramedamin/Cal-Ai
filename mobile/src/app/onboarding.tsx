@@ -1,23 +1,25 @@
 /**
- * Onboarding: body stats and goal, then targets.
+ * Onboarding funnel.
  *
- * One route holding several steps rather than one route per step. Onboarding is
- * a single transaction — nothing is saved until the end — and separate routes
+ * One route holding every step rather than one route per step. Onboarding is a
+ * single transaction — nothing is saved until the end — and separate routes
  * would let the hardware back button strand a user halfway through a form whose
- * state lives somewhere else. Here "back" is just an index going down.
+ * state lives somewhere else. Here "back" is an index going down.
+ *
+ * **The one thing this funnel does differently from the apps it looks like.**
+ *
+ * Funnels in this category are built to convert, and the usual tricks are
+ * fabricated social proof, a "without us" curve invented to look alarming, and a
+ * projected date presented as a forecast. This one keeps the shape — the
+ * progress bar, the cards, the encouragement steps, the projection chart —
+ * because that shape genuinely makes a long form bearable. What it does not do
+ * is dress an illustration up as data: the projection screen says in plain words
+ * that the curve is illustrative and only the endpoints are calculated.
  */
 
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError } from '@/api/client';
 import {
@@ -28,54 +30,91 @@ import {
   saveProfile,
 } from '@/api/profile';
 import { Button } from '@/components/button';
-import { OptionList, type Option } from '@/components/option-list';
+import { AchievementCurve, ChoiceCard, FunnelHeader, FunnelStep } from '@/components/funnel';
+import { RulerPicker } from '@/components/ruler-picker';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
-import { HOME } from '@/routes';
-import { color, radius, space } from '@/theme/tokens';
-import { text } from '@/theme/typography';
+import {
+  HEIGHT_RANGE,
+  type HeightUnit,
+  WEIGHT_RANGE,
+  type WeightUnit,
+  cmToInches,
+  formatFeetInches,
+  inchesToCm,
+  kgToLbs,
+  lbsToKg,
+} from '@/lib/units';
+import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
+import { fontFamily, text } from '@/theme/typography';
 
-const SEX_OPTIONS: readonly Option<Sex>[] = [
-  { value: 'female', label: 'Female' },
-  { value: 'male', label: 'Male' },
+const FOOTNOTE = 'Your measurements are stored only on your own account.';
+
+const SEX_OPTIONS: { value: Sex; label: string; description: string }[] = [
+  { value: 'female', label: 'Female', description: 'Uses the −161 constant' },
+  { value: 'male', label: 'Male', description: 'Uses the +5 constant' },
 ];
 
-const ACTIVITY_OPTIONS: readonly Option<ActivityLevel>[] = [
-  { value: 'sedentary', label: 'Sedentary', description: 'Desk job, little or no exercise' },
-  { value: 'light', label: 'Light', description: 'Light exercise 1–3 days a week' },
-  { value: 'moderate', label: 'Moderate', description: 'Moderate exercise 3–5 days a week' },
-  { value: 'active', label: 'Active', description: 'Hard exercise 6–7 days a week' },
+const ACTIVITY_OPTIONS: {
+  value: ActivityLevel;
+  label: string;
+  description: string;
+}[] = [
+  { value: 'sedentary', label: '0', description: 'Desk job, little or no exercise' },
+  { value: 'light', label: '1–2', description: 'Workouts now and then' },
+  { value: 'moderate', label: '3–5', description: 'A few workouts per week' },
+  { value: 'active', label: '6–7', description: 'Hard exercise most days' },
+  { value: 'very_active', label: '7+', description: 'Physical job, or training twice a day' },
+];
+
+const GOAL_OPTIONS: {
+  value: Goal;
+  label: string;
+  description: string;
+  icon: 'trending-down' | 'remove' | 'trending-up' | 'barbell';
+}[] = [
+  { value: 'cut', label: 'Lose fat', description: '20% below maintenance', icon: 'trending-down' },
+  { value: 'maintain', label: 'Maintain', description: 'Eat at maintenance', icon: 'remove' },
   {
-    value: 'very_active',
-    label: 'Very active',
-    description: 'Physical job, or training twice a day',
+    value: 'lean_bulk',
+    label: 'Lean bulk',
+    description: '10% above maintenance',
+    icon: 'trending-up',
   },
+  { value: 'bulk', label: 'Bulk', description: '15% above maintenance', icon: 'barbell' },
 ];
 
-const GOAL_OPTIONS: readonly Option<Goal>[] = [
-  { value: 'cut', label: 'Lose fat', description: '20% below maintenance' },
-  { value: 'maintain', label: 'Maintain', description: 'Eat at maintenance' },
-  { value: 'lean_bulk', label: 'Lean bulk', description: '10% above maintenance' },
-  { value: 'bulk', label: 'Bulk', description: '15% above maintenance' },
-];
-
-const STEP_COUNT = 5;
+/** Steps in order. `target` is skipped when the goal is maintenance. */
+const STEPS = ['sex', 'birth', 'body', 'activity', 'goal', 'target', 'ready'] as const;
+type Step = (typeof STEPS)[number];
 
 export default function OnboardingScreen() {
   const router = useRouter();
 
-  const [step, setStep] = useState(0);
+  const [stepIndex, setStepIndex] = useState(0);
   const [sex, setSex] = useState<Sex | null>(null);
   const [birthYear, setBirthYear] = useState('');
   const [birthMonth, setBirthMonth] = useState('');
   const [birthDay, setBirthDay] = useState('');
-  const [heightCm, setHeightCm] = useState('');
-  const [weightKg, setWeightKg] = useState('');
+  const [heightCm, setHeightCm] = useState(170);
+  const [weightKg, setWeightKg] = useState(70);
+  const [targetKg, setTargetKg] = useState(65);
   const [activity, setActivity] = useState<ActivityLevel | null>(null);
   const [goal, setGoal] = useState<Goal | null>(null);
 
+  const [heightUnit, setHeightUnit] = useState<HeightUnit>('cm');
+  const [weightUnit, setWeightUnit] = useState<WeightUnit>('kg');
+
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Maintenance has no target weight, so that step is removed from the sequence
+  // rather than shown and skipped — otherwise the progress bar jumps.
+  const steps = useMemo(
+    () => STEPS.filter((step) => step !== 'target' || (goal !== null && goal !== 'maintain')),
+    [goal],
+  );
+  const step: Step = steps[Math.min(stepIndex, steps.length - 1)];
 
   const birthDate = useMemo(() => {
     const y = Number(birthYear);
@@ -83,28 +122,31 @@ export default function OnboardingScreen() {
     const d = Number(birthDay);
     if (!y || !m || !d) return null;
     if (m < 1 || m > 12 || d < 1 || d > 31) return null;
-    // Constructed as a plain string rather than a Date, because `new Date(...)`
-    // would apply the device's timezone and could shift the day by one.
+    // Built as a plain string rather than a Date, because `new Date(...)` would
+    // apply the device's timezone and could shift the day by one.
     return `${y.toString().padStart(4, '0')}-${m.toString().padStart(2, '0')}-${d
       .toString()
       .padStart(2, '0')}`;
   }, [birthYear, birthMonth, birthDay]);
 
-  const height = Number(heightCm);
-  const weight = Number(weightKg);
+  const canAdvance: Record<Step, boolean> = {
+    sex: sex !== null,
+    birth: birthDate !== null,
+    body: heightCm > 0 && weightKg > 0,
+    activity: activity !== null,
+    goal: goal !== null,
+    target: targetKg > 0,
+    ready: true,
+  };
 
-  // Each step knows only whether it is complete. Validation of *ranges* is left
-  // to the server and the shared targets module — duplicating the bounds here
-  // would create a second definition that drifts.
-  const canAdvance = [
-    sex !== null,
-    birthDate !== null,
-    Number.isFinite(height) && height > 0,
-    Number.isFinite(weight) && weight > 0,
-    activity !== null && goal !== null,
-  ][step];
+  const isLast = stepIndex === steps.length - 1;
 
-  async function handleFinish() {
+  function goBack() {
+    if (stepIndex === 0) router.back();
+    else setStepIndex(stepIndex - 1);
+  }
+
+  async function finish() {
     if (!sex || !birthDate || !activity || !goal) return;
     setError(null);
     setSubmitting(true);
@@ -112,14 +154,16 @@ export default function OnboardingScreen() {
       await saveProfile({
         sex,
         birth_date: birthDate,
-        height_cm: height,
-        weight_kg: weight,
+        height_cm: heightCm,
+        weight_kg: weightKg,
         activity_level: activity,
         goal,
+        target_weight_kg: goal === 'maintain' ? null : targetKg,
         timezone: deviceTimezone(),
       });
-      // The dashboard refetches on focus, so it will show the new targets.
-      router.replace(HOME);
+      // The plan screen reads the saved profile back, so the numbers it shows
+      // are the server's, not a client-side re-derivation that could drift.
+      router.replace('/plan');
     } catch (caught) {
       setError(
         caught instanceof ApiError ? caught.userMessage : 'Something went wrong. Try again.',
@@ -131,211 +175,326 @@ export default function OnboardingScreen() {
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <FunnelHeader progress={(stepIndex + 1) / steps.length} onBack={goBack} />
+
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <ProgressDots total={STEP_COUNT} current={step} />
+        {step === 'sex' && (
+          <FunnelStep
+            title="Which equation should we use?"
+            subtitle="Mifflin-St Jeor uses a different constant for each. This is about body composition, not identity."
+            footnote={FOOTNOTE}
+          >
+            {SEX_OPTIONS.map((option) => (
+              <ChoiceCard
+                key={option.value}
+                label={option.label}
+                description={option.description}
+                selected={sex === option.value}
+                onPress={() => setSex(option.value)}
+              />
+            ))}
+          </FunnelStep>
+        )}
 
-          {step === 0 && (
-            <StepShell
-              title="Which equation should we use?"
-              subtitle="The Mifflin-St Jeor formula uses a different constant for each. It's about body composition, not identity."
-            >
-              <OptionList options={SEX_OPTIONS} value={sex} onChange={setSex} />
-            </StepShell>
-          )}
-
-          {step === 1 && (
-            <StepShell
-              title="When were you born?"
-              subtitle="Metabolic rate falls gradually with age, so the date matters more than you'd think."
-            >
-              <View style={styles.dateRow}>
-                <View style={styles.dateDay}>
-                  <TextField
-                    label="Day"
-                    value={birthDay}
-                    onChangeText={setBirthDay}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                    placeholder="20"
-                  />
-                </View>
-                <View style={styles.dateDay}>
-                  <TextField
-                    label="Month"
-                    value={birthMonth}
-                    onChangeText={setBirthMonth}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                    placeholder="05"
-                  />
-                </View>
-                <View style={styles.dateYear}>
-                  <TextField
-                    label="Year"
-                    value={birthYear}
-                    onChangeText={setBirthYear}
-                    keyboardType="number-pad"
-                    maxLength={4}
-                    placeholder="1996"
-                  />
-                </View>
+        {step === 'birth' && (
+          <FunnelStep
+            title="When were you born?"
+            subtitle="Metabolic rate falls gradually with age, so the date matters more than you'd think."
+            footnote={FOOTNOTE}
+          >
+            <View style={styles.dateRow}>
+              <View style={styles.dateSmall}>
+                <TextField
+                  label="Day"
+                  value={birthDay}
+                  onChangeText={setBirthDay}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  placeholder="20"
+                />
               </View>
-            </StepShell>
-          )}
-
-          {step === 2 && (
-            <StepShell title="How tall are you?" subtitle="In centimetres.">
-              <TextField
-                label="Height"
-                value={heightCm}
-                onChangeText={setHeightCm}
-                keyboardType="decimal-pad"
-                placeholder="180"
-                hint="Between 100 and 250 cm"
-              />
-            </StepShell>
-          )}
-
-          {step === 3 && (
-            <StepShell
-              title="What do you weigh?"
-              subtitle="You'll log this again over time — the trend is what matters, not any single morning."
-            >
-              <TextField
-                label="Weight"
-                value={weightKg}
-                onChangeText={setWeightKg}
-                keyboardType="decimal-pad"
-                placeholder="80"
-                hint="In kilograms"
-              />
-            </StepShell>
-          )}
-
-          {step === 4 && (
-            <StepShell
-              title="How active are you, and what are you aiming for?"
-              subtitle="Be honest about activity — overestimating here is the most common reason a target comes out too high."
-            >
-              <Text style={styles.groupLabel}>Activity</Text>
-              <OptionList options={ACTIVITY_OPTIONS} value={activity} onChange={setActivity} />
-              <Text style={[styles.groupLabel, styles.groupSpacing]}>Goal</Text>
-              <OptionList options={GOAL_OPTIONS} value={goal} onChange={setGoal} />
-            </StepShell>
-          )}
-
-          {error && (
-            <View style={styles.errorBox} accessibilityRole="alert">
-              <Text style={styles.errorText}>{error}</Text>
+              <View style={styles.dateSmall}>
+                <TextField
+                  label="Month"
+                  value={birthMonth}
+                  onChangeText={setBirthMonth}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  placeholder="05"
+                />
+              </View>
+              <View style={styles.dateLarge}>
+                <TextField
+                  label="Year"
+                  value={birthYear}
+                  onChangeText={setBirthYear}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  placeholder="1996"
+                />
+              </View>
             </View>
-          )}
+          </FunnelStep>
+        )}
 
-          <View style={styles.actions}>
-            <Button
-              label={step === STEP_COUNT - 1 ? 'See my targets' : 'Continue'}
-              disabled={!canAdvance}
-              loading={submitting}
-              onPress={() => {
-                if (step === STEP_COUNT - 1) void handleFinish();
-                else setStep(step + 1);
-              }}
-            />
-            {step > 0 && (
-              <Pressable
-                onPress={() => setStep(step - 1)}
-                accessibilityRole="button"
-                style={styles.back}
-              >
-                <Text style={styles.backLabel}>Back</Text>
-              </Pressable>
+        {step === 'body' && (
+          <FunnelStep title="Height & weight" subtitle="Both feed the calculation." footnote={FOOTNOTE}>
+            <View style={styles.measure}>
+              <View style={styles.measureHead}>
+                <Text style={styles.measureLabel}>Height</Text>
+                <UnitToggle
+                  options={[
+                    { value: 'ftin', label: 'ft/in' },
+                    { value: 'cm', label: 'cm' },
+                  ]}
+                  value={heightUnit}
+                  onChange={setHeightUnit}
+                />
+              </View>
+              {heightUnit === 'cm' ? (
+                <RulerPicker
+                  {...HEIGHT_RANGE.cm}
+                  value={Math.round(heightCm)}
+                  onChange={setHeightCm}
+                  unit="cm"
+                />
+              ) : (
+                <RulerPicker
+                  {...HEIGHT_RANGE.ftin}
+                  value={Math.round(cmToInches(heightCm))}
+                  onChange={(inches) => setHeightCm(inchesToCm(inches))}
+                  formatValue={formatFeetInches}
+                />
+              )}
+            </View>
+
+            <View style={styles.measure}>
+              <View style={styles.measureHead}>
+                <Text style={styles.measureLabel}>Weight</Text>
+                <UnitToggle
+                  options={[
+                    { value: 'lbs', label: 'lbs' },
+                    { value: 'kg', label: 'kg' },
+                  ]}
+                  value={weightUnit}
+                  onChange={setWeightUnit}
+                />
+              </View>
+              {weightUnit === 'kg' ? (
+                <RulerPicker
+                  {...WEIGHT_RANGE.kg}
+                  value={Math.round(weightKg)}
+                  onChange={(kg) => {
+                    setWeightKg(kg);
+                    setTargetKg((current) => (current === 0 ? kg : current));
+                  }}
+                  unit="kg"
+                />
+              ) : (
+                <RulerPicker
+                  {...WEIGHT_RANGE.lbs}
+                  value={Math.round(kgToLbs(weightKg))}
+                  onChange={(lbs) => setWeightKg(lbsToKg(lbs))}
+                  unit="lbs"
+                />
+              )}
+            </View>
+          </FunnelStep>
+        )}
+
+        {step === 'activity' && (
+          <FunnelStep
+            title="How often do you train?"
+            subtitle="Be honest — overestimating here is the single most common reason a calorie target comes out too high."
+            footnote={FOOTNOTE}
+          >
+            {ACTIVITY_OPTIONS.map((option) => (
+              <ChoiceCard
+                key={option.value}
+                label={`${option.label} sessions a week`}
+                description={option.description}
+                selected={activity === option.value}
+                onPress={() => setActivity(option.value)}
+              />
+            ))}
+          </FunnelStep>
+        )}
+
+        {step === 'goal' && (
+          <FunnelStep
+            title="What are you aiming for?"
+            subtitle="This sets how far your target sits from maintenance."
+            footnote={FOOTNOTE}
+          >
+            {GOAL_OPTIONS.map((option) => (
+              <ChoiceCard
+                key={option.value}
+                icon={option.icon}
+                label={option.label}
+                description={option.description}
+                selected={goal === option.value}
+                onPress={() => {
+                  setGoal(option.value);
+                  // Seed a sensible target so the ruler does not open on a value
+                  // that contradicts the goal just chosen.
+                  setTargetKg(
+                    option.value === 'cut'
+                      ? Math.max(WEIGHT_RANGE.kg.min, Math.round(weightKg * 0.9))
+                      : Math.round(weightKg * 1.08),
+                  );
+                }}
+              />
+            ))}
+          </FunnelStep>
+        )}
+
+        {step === 'target' && (
+          <FunnelStep
+            title="What weight are you aiming for?"
+            subtitle="Used for the projection below. Your calorie target comes from your goal, not from this number."
+            footnote={FOOTNOTE}
+          >
+            {weightUnit === 'kg' ? (
+              <RulerPicker
+                {...WEIGHT_RANGE.kg}
+                value={Math.round(targetKg)}
+                onChange={setTargetKg}
+                unit="kg"
+                reference={{ value: weightKg, label: 'Now' }}
+              />
+            ) : (
+              <RulerPicker
+                {...WEIGHT_RANGE.lbs}
+                value={Math.round(kgToLbs(targetKg))}
+                onChange={(lbs) => setTargetKg(lbsToKg(lbs))}
+                unit="lbs"
+                reference={{ value: kgToLbs(weightKg), label: 'Now' }}
+              />
             )}
+          </FunnelStep>
+        )}
+
+        {step === 'ready' && (
+          <FunnelStep
+            title={readyTitle(goal, weightKg, targetKg, weightUnit)}
+            subtitle="People who log consistently in the first week are far more likely to still be logging in the second. The first few days are the whole game."
+          >
+            <AchievementCurve />
+            <View style={styles.curveAxis}>
+              <Text style={styles.curveAxisLabel}>Day 1</Text>
+              <Text style={styles.curveAxisLabel}>Day 7</Text>
+              <Text style={styles.curveAxisLabel}>Day 30</Text>
+            </View>
+            <Text style={styles.illustrative}>
+              Illustrative — it shows the habit curve, not a prediction about you.
+            </Text>
+          </FunnelStep>
+        )}
+
+        {error && (
+          <View style={styles.errorBox} accessibilityRole="alert">
+            <Text style={styles.errorText}>{error}</Text>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        )}
+      </ScrollView>
+
+      <Button
+        label={isLast ? 'Build my plan' : 'Next'}
+        disabled={!canAdvance[step]}
+        loading={submitting}
+        onPress={() => {
+          if (isLast) void finish();
+          else setStepIndex(stepIndex + 1);
+        }}
+      />
     </Screen>
   );
 }
 
-function StepShell({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.step}>
-      <Text style={text.title}>{title}</Text>
-      <Text style={[text.bodyMuted, styles.subtitle]}>{subtitle}</Text>
-      {children}
-    </View>
-  );
+function readyTitle(
+  goal: Goal | null,
+  weightKg: number,
+  targetKg: number,
+  unit: WeightUnit,
+): string {
+  if (goal === 'maintain') return 'Ready to hold steady?';
+  const deltaKg = Math.abs(weightKg - targetKg);
+  const shown = Math.round(unit === 'kg' ? deltaKg : kgToLbs(deltaKg));
+  if (shown === 0) return 'Ready to start?';
+  const verb = targetKg < weightKg ? 'drop' : 'gain';
+  return `Ready to ${verb} ${shown} ${unit}?`;
 }
 
-function ProgressDots({ total, current }: { total: number; current: number }) {
+function UnitToggle<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
   return (
-    <View
-      style={styles.dots}
-      accessibilityRole="progressbar"
-      accessibilityLabel={`Step ${current + 1} of ${total}`}
-    >
-      {Array.from({ length: total }, (_, index) => (
-        <View
-          key={index}
-          style={[
-            styles.dot,
-            index === current && styles.dotCurrent,
-            index < current && styles.dotDone,
-          ]}
-        />
-      ))}
+    <View style={styles.toggle}>
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            style={[styles.toggleOption, selected && styles.toggleOptionSelected]}
+          >
+            <Text style={[styles.toggleLabel, selected && styles.toggleLabelSelected]}>
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  content: { flexGrow: 1, paddingBottom: space.xxl },
-  dots: {
-    flexDirection: 'row',
-    gap: space.xs,
-    marginBottom: space.xl,
-  },
-  dot: {
-    flex: 1,
-    height: 3,
-    borderRadius: radius.pill,
-    backgroundColor: color.inkWash,
-  },
-  dotDone: { backgroundColor: color.clay, opacity: 0.45 },
-  dotCurrent: { backgroundColor: color.clay },
-  step: { gap: space.md },
-  subtitle: { marginBottom: space.lg },
-  groupLabel: { ...text.overline, color: color.inkMuted },
-  groupSpacing: { marginTop: space.lg },
+  scroll: { flexGrow: 1, paddingBottom: space.lg },
+
   dateRow: { flexDirection: 'row', gap: space.md },
-  dateDay: { flex: 1 },
-  dateYear: { flex: 1.4 },
+  dateSmall: { flex: 1 },
+  dateLarge: { flex: 1.4 },
+
+  measure: { gap: space.sm },
+  measureHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  measureLabel: { fontFamily: fontFamily.bold, fontSize: 17, color: color.ink },
+
+  toggle: { flexDirection: 'row', backgroundColor: color.wash, borderRadius: radius.pill, padding: 3 },
+  toggleOption: {
+    minWidth: 54,
+    minHeight: HIT_SLOP_MIN - 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space.md,
+    borderRadius: radius.pill,
+  },
+  toggleOptionSelected: { backgroundColor: color.ink },
+  toggleLabel: { ...text.label, fontSize: 13, color: color.inkMuted },
+  toggleLabelSelected: { color: color.onDark },
+
+  curveAxis: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: space.lg },
+  curveAxisLabel: { ...text.bodyMuted, fontSize: 12 },
+  illustrative: { ...text.bodyMuted, fontSize: 11, textAlign: 'center', marginTop: space.sm },
+
   errorBox: {
     marginTop: space.lg,
     padding: space.md,
     borderRadius: radius.md,
     backgroundColor: color.inkWash,
     borderLeftWidth: 3,
-    borderLeftColor: color.clayDeep,
+    borderLeftColor: color.danger,
   },
   errorText: { ...text.body, fontSize: 14 },
-  actions: { marginTop: space.xxl, gap: space.md },
-  back: { alignSelf: 'center', padding: space.sm },
-  backLabel: { ...text.label, color: color.inkMuted },
 });
