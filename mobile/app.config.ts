@@ -49,6 +49,10 @@ const config: ExpoConfig = {
 
   plugins: [
     'expo-router',
+    // Configures the native keystore/keychain access. It has no effect inside
+    // Expo Go, which cannot apply config plugins, but it must be declared now so
+    // the first real build in Phase 7 is not missing it.
+    'expo-secure-store',
     [
       'expo-splash-screen',
       {

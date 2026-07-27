@@ -6,7 +6,7 @@
  * opacity fade, which washes out the label as well as the background.
  */
 
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
 
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -15,23 +15,29 @@ interface ButtonProps {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  /** Shows a spinner and blocks presses. Use while a submit is in flight. */
+  loading?: boolean;
 }
 
-export function Button({ label, onPress, disabled = false }: ButtonProps) {
+export function Button({ label, onPress, disabled = false, loading = false }: ButtonProps) {
+  // Blocking presses while loading is what prevents a double-tap creating two
+  // accounts, or firing two logins that each mint a session.
+  const inert = disabled || loading;
+
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled}
+      disabled={inert}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-      style={({ pressed }) => [
-        styles.base,
-        pressed && styles.pressed,
-        disabled && styles.disabled,
-      ]}
+      accessibilityState={{ disabled: inert, busy: loading }}
+      style={({ pressed }) => [styles.base, pressed && styles.pressed, inert && styles.disabled]}
     >
-      <Text style={styles.label}>{label}</Text>
+      {loading ? (
+        <ActivityIndicator color={color.onDark} />
+      ) : (
+        <Text style={styles.label}>{label}</Text>
+      )}
     </Pressable>
   );
 }

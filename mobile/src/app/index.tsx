@@ -1,48 +1,42 @@
 /**
- * Phase 0 connection check.
+ * Signed-in home.
  *
- * This screen exists to prove the whole pipe works — phone → API → Postgres —
- * before a single feature is built. Its purpose is temporary; its quality is
- * not. It already uses the design tokens, and it already has the three designed
- * states every screen in this app is required to have.
- *
- * The hero number is the round-trip time. On a screen about connectivity that is
- * genuinely the most useful number on it, and it gives the tabular numerals
- * something real to do.
+ * Phase 2 replaces this with onboarding and the daily targets screen. For now it
+ * proves the two things Phase 1 is responsible for: that a protected endpoint
+ * accepts our token, and that the session survives a full app restart.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { ApiError, resolveApiBaseUrl } from '@/api/client';
+import { ApiError } from '@/api/client';
 import { getHealth, type Health } from '@/api/health';
+import { useAuth } from '@/auth/context';
 import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
 import { StatusRow } from '@/components/status-row';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
-type Phase =
-  | { kind: 'loading' }
-  | { kind: 'ready'; health: Health; latencyMs: number }
-  | { kind: 'failed'; error: ApiError };
+type BackendState =
+  | { kind: 'checking' }
+  | { kind: 'ready'; health: Health }
+  | { kind: 'failed'; message: string };
 
-export default function ConnectionCheckScreen() {
-  const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
-  const baseUrl = resolveApiBaseUrl();
+export default function HomeScreen() {
+  const { user, signOut } = useAuth();
+  const [backend, setBackend] = useState<BackendState>({ kind: 'checking' });
+  const [signingOut, setSigningOut] = useState(false);
 
   const check = useCallback(async () => {
-    setPhase({ kind: 'loading' });
-    const startedAt = Date.now();
+    setBackend({ kind: 'checking' });
     try {
-      const health = await getHealth();
-      setPhase({ kind: 'ready', health, latencyMs: Date.now() - startedAt });
-    } catch (caught) {
-      const error =
-        caught instanceof ApiError
-          ? caught
-          : new ApiError('network', caught instanceof Error ? caught.message : 'Unknown failure');
-      setPhase({ kind: 'failed', error });
+      setBackend({ kind: 'ready', health: await getHealth() });
+    } catch (error) {
+      setBackend({
+        kind: 'failed',
+        message: error instanceof ApiError ? error.userMessage : 'Could not reach the server.',
+      });
     }
   }, []);
 
@@ -50,165 +44,74 @@ export default function ConnectionCheckScreen() {
     void check();
   }, [check]);
 
+  const memberSince = user
+    ? new Date(user.created_at).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })
+    : '—';
+
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={text.overline}>CalAi</Text>
-        <Text style={text.title}>Connection check</Text>
+        <Text style={text.overline}>Signed in</Text>
+        <Text style={text.title}>{user?.email ?? 'Your account'}</Text>
         <Text style={[text.bodyMuted, styles.intro]}>
-          Phase 0 proves the whole pipe before any features exist: this phone, the FastAPI
-          backend, and Postgres behind it.
+          Phase 1 is done: your account is real, your session is stored in the device keystore,
+          and this screen loaded by calling a protected endpoint with your token.
         </Text>
 
-        {phase.kind === 'loading' && <LoadingState baseUrl={baseUrl} />}
-        {phase.kind === 'ready' && (
-          <ReadyState health={phase.health} latencyMs={phase.latencyMs} baseUrl={baseUrl} />
-        )}
-        {phase.kind === 'failed' && <FailedState error={phase.error} baseUrl={baseUrl} />}
+        <View style={styles.card}>
+          <StatusRow label="Account" value={user ? 'Verified' : 'Unknown'} tone={user ? 'good' : 'bad'} />
+          <StatusRow label="Member since" value={memberSince} tone="good" />
+          {backend.kind === 'checking' && (
+            <StatusRow label="Backend" value="Checking…" tone="pending" />
+          )}
+          {backend.kind === 'ready' && (
+            <StatusRow
+              label="Backend"
+              value={`v${backend.health.version} · db ${backend.health.db}`}
+              tone={backend.health.db === 'ok' ? 'good' : 'warn'}
+            />
+          )}
+          {backend.kind === 'failed' && (
+            <StatusRow label="Backend" value="Unreachable" tone="bad" />
+          )}
+        </View>
 
-        {phase.kind !== 'loading' && (
-          <View style={styles.actions}>
-            <Button label="Check again" onPress={() => void check()} />
+        {backend.kind === 'failed' && (
+          <View style={styles.callout} accessibilityRole="alert">
+            <Text style={styles.calloutTitle}>Can&apos;t reach the backend</Text>
+            <Text style={[text.bodyMuted, styles.calloutLine]}>{backend.message}</Text>
+            <Text style={[text.bodyMuted, styles.calloutLine]}>
+              You are still signed in — this only affects loading new data.
+            </Text>
           </View>
         )}
+
+        <View style={styles.nextUp}>
+          <Text style={text.overline}>Next</Text>
+          <Text style={[text.bodyMuted, styles.calloutLine]}>
+            Phase 2 collects your body stats and goal, then calculates your daily calorie and
+            macro targets — and shows you exactly how the number was derived.
+          </Text>
+        </View>
+
+        <View style={styles.actions}>
+          <Button
+            label="Sign out"
+            loading={signingOut}
+            onPress={() => {
+              setSigningOut(true);
+              void signOut().finally(() => setSigningOut(false));
+            }}
+          />
+        </View>
       </ScrollView>
     </Screen>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-
-function LoadingState({ baseUrl }: { baseUrl: string }) {
-  return (
-    <View style={styles.card}>
-      <StatusRow label="Backend" value="Checking…" tone="pending" />
-      <StatusRow label="Database" value="Waiting" tone="pending" />
-      <Text style={[text.bodyMuted, styles.footnote]}>Reaching {baseUrl}</Text>
-    </View>
-  );
-}
-
-function ReadyState({
-  health,
-  latencyMs,
-  baseUrl,
-}: {
-  health: Health;
-  latencyMs: number;
-  baseUrl: string;
-}) {
-  const dbReachable = health.db === 'ok';
-
-  return (
-    <>
-      <View style={styles.heroBlock}>
-        <Text style={text.hero}>{latencyMs}</Text>
-        <Text style={text.overline}>ms round trip</Text>
-      </View>
-
-      <View style={styles.card}>
-        <StatusRow label="Backend" value={`v${health.version}`} tone="good" />
-        <StatusRow
-          label="Database"
-          value={dbReachable ? 'Connected' : 'Unreachable'}
-          tone={dbReachable ? 'good' : 'bad'}
-        />
-        <StatusRow label="Endpoint" value={baseUrl} tone="good" />
-      </View>
-
-      {/*
-        The backend answered, so this is not a connection failure — it is a
-        partial success, and it gets its own treatment rather than being folded
-        into the generic error state. Telling the user "the API is fine, the
-        database is not" is the difference between a useful message and a shrug.
-      */}
-      {!dbReachable && (
-        <Callout
-          title="Postgres isn't reachable"
-          lines={[
-            'The API is running and answering, but it cannot reach the database.',
-            'Start it with:  docker compose up -d',
-            'Confirm it came up healthy with:  docker compose ps',
-          ]}
-        />
-      )}
-    </>
-  );
-}
-
-function FailedState({ error, baseUrl }: { error: ApiError; baseUrl: string }) {
-  const { title, lines } = describeFailure(error, baseUrl);
-
-  return (
-    <>
-      <View style={styles.card}>
-        <StatusRow label="Backend" value="No response" tone="bad" />
-        <StatusRow label="Database" value="Unknown" tone="pending" />
-      </View>
-      <Callout title={title} lines={lines} />
-    </>
-  );
-}
-
-/**
- * Each failure kind gets advice specific to it. A single "Something went wrong"
- * would be true, useless, and exactly the vague apology the brief rules out.
- */
-function describeFailure(error: ApiError, baseUrl: string): { title: string; lines: string[] } {
-  switch (error.kind) {
-    case 'timeout':
-      return {
-        title: 'The backend did not answer in time',
-        lines: [
-          `No reply from ${baseUrl} within 10 seconds.`,
-          'It may still be starting, or stuck opening a database connection.',
-          'Check the terminal running uvicorn for a traceback.',
-        ],
-      };
-    case 'http':
-      return {
-        title: `The backend returned ${error.status ?? 'an error'}`,
-        lines: [
-          'The connection itself worked, so networking is fine — the server failed.',
-          'The uvicorn terminal will have the traceback.',
-        ],
-      };
-    case 'parse':
-      return {
-        title: 'The response was not valid JSON',
-        lines: [
-          `Something answered at ${baseUrl}, but it was not the CalAi API.`,
-          'A captive portal or a proxy on this network causes exactly this.',
-        ],
-      };
-    default:
-      return {
-        title: 'Cannot reach the backend',
-        lines: [
-          `Tried ${baseUrl} and got no response at all.`,
-          '1.  Is uvicorn running?',
-          '2.  Was it started with --host 0.0.0.0 ?  Bound to 127.0.0.1 it refuses this phone.',
-          '3.  Is this phone on the same Wi-Fi as the computer?',
-          '4.  Windows Firewall blocks inbound port 8000 by default — see the README.',
-        ],
-      };
-  }
-}
-
-function Callout({ title, lines }: { title: string; lines: string[] }) {
-  return (
-    <View style={styles.callout} accessibilityRole="alert">
-      <Text style={styles.calloutTitle}>{title}</Text>
-      {lines.map((line) => (
-        <Text key={line} style={[text.bodyMuted, styles.calloutLine]}>
-          {line}
-        </Text>
-      ))}
-    </View>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
 
 const styles = StyleSheet.create({
   content: {
@@ -218,10 +121,6 @@ const styles = StyleSheet.create({
     marginTop: space.sm,
     marginBottom: space.xl,
   },
-  heroBlock: {
-    alignItems: 'flex-start',
-    marginBottom: space.lg,
-  },
   card: {
     backgroundColor: color.surface,
     borderRadius: radius.lg,
@@ -230,17 +129,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingVertical: space.xs,
   },
-  footnote: {
-    paddingVertical: space.md,
-    fontSize: 13,
-  },
   callout: {
     marginTop: space.lg,
     padding: space.lg,
     borderRadius: radius.md,
     backgroundColor: color.inkWash,
-    // A left rule rather than a filled panel: it reads as "note" at a glance
-    // without turning the block into an alarming slab of colour.
     borderLeftWidth: 3,
     borderLeftColor: color.clay,
     gap: space.xs,
@@ -253,7 +146,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  actions: {
+  nextUp: {
     marginTop: space.xl,
+    gap: space.sm,
+  },
+  actions: {
+    marginTop: space.xxl,
   },
 });
