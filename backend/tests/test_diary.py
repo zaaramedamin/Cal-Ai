@@ -1,11 +1,28 @@
 """Diary logging, totals and the nutrient snapshot."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.food import Food
+
+
+def profile_today() -> date:
+    """Today *in the timezone the test profiles declare*, which is UTC.
+
+    Not `date.today()`. That returns the machine's local date, and the server
+    decides which day an entry belongs to from the profile's timezone — so on a
+    machine running ahead of UTC, a test computing "yesterday" locally is
+    handing the server today's date and asserting it lands on a different day.
+
+    The suite passed for months and began failing at 00:22 local / 23:22 UTC,
+    which is exactly the one-hour window where the two disagree. A test for
+    timezone-sensitive behaviour has to speak the same timezone as the code it
+    is testing.
+    """
+    return datetime.now(UTC).date()
+
 
 PROFILE = {
     "sex": "male",
@@ -276,7 +293,7 @@ async def test_past_days_can_be_read_and_are_separate(
 ) -> None:
     food = await make_food(session)
     headers = onboarded(client)
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (profile_today() - timedelta(days=1)).isoformat()
 
     client.post(
         "/api/v1/diary",
@@ -299,7 +316,7 @@ async def test_past_days_can_be_read_and_are_separate(
 async def test_future_dates_are_rejected(client: TestClient, session: AsyncSession) -> None:
     food = await make_food(session)
     headers = onboarded(client)
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (profile_today() + timedelta(days=1)).isoformat()
 
     response = client.post(
         "/api/v1/diary",
@@ -332,3 +349,110 @@ async def test_logging_requires_onboarding(client: TestClient, session: AsyncSes
 def test_diary_requires_authentication(client: TestClient) -> None:
     assert client.get("/api/v1/diary").status_code == 401
     assert client.post("/api/v1/diary", json={}).status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# Quick add: the user's own staples, ready to re-log in one tap.
+# --------------------------------------------------------------------------- #
+
+
+async def test_quick_add_is_empty_before_anything_is_logged(client: TestClient) -> None:
+    """A new user gets no chips rather than a placeholder row."""
+    headers = onboarded(client, "quick-empty@example.com")
+
+    response = client.get("/api/v1/foods/quick-add", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_quick_add_ranks_by_frequency_not_recency(
+    client: TestClient, session: AsyncSession
+) -> None:
+    """"Your usuals", not "your history".
+
+    The most recently eaten food is often the unusual one — the restaurant meal,
+    the one-off. What earns a place on the dashboard is the thing eaten
+    repeatedly, so a food logged three times outranks one logged later but once.
+    """
+    staple = await make_food(session, name="Oats, rolled", source_id="oats")
+    oneoff = await make_food(session, name="Cheesecake", source_id="cake")
+    headers = onboarded(client, "quick-rank@example.com")
+
+    for _ in range(3):
+        client.post(
+            "/api/v1/diary",
+            json={"food_id": str(staple.id), "meal_slot": "breakfast", "quantity_grams": 60},
+            headers=headers,
+        )
+    # Logged last, so recency alone would put it first.
+    client.post(
+        "/api/v1/diary",
+        json={"food_id": str(oneoff.id), "meal_slot": "snack", "quantity_grams": 120},
+        headers=headers,
+    )
+
+    results = client.get("/api/v1/foods/quick-add", headers=headers).json()
+
+    assert [row["name"] for row in results] == ["Oats, rolled", "Cheesecake"]
+    assert results[0]["times_logged"] == 3
+
+
+async def test_quick_add_remembers_the_last_quantity_and_slot(
+    client: TestClient, session: AsyncSession
+) -> None:
+    """The field that makes the chip worth having.
+
+    Without the remembered amount, tapping a chip still has to ask "how much?"
+    and has saved the user nothing.
+    """
+    food = await make_food(session, name="Oats, rolled", source_id="oats")
+    headers = onboarded(client, "quick-qty@example.com")
+
+    client.post(
+        "/api/v1/diary",
+        json={"food_id": str(food.id), "meal_slot": "breakfast", "quantity_grams": 60},
+        headers=headers,
+    )
+    # A later, different amount must win — the chip should offer what you did
+    # last time, not what you did first.
+    client.post(
+        "/api/v1/diary",
+        json={"food_id": str(food.id), "meal_slot": "dinner", "quantity_grams": 85},
+        headers=headers,
+    )
+
+    row = client.get("/api/v1/foods/quick-add", headers=headers).json()[0]
+
+    assert row["last_quantity_grams"] == 85
+    assert row["last_meal_slot"] == "dinner"
+    assert row["times_logged"] == 2
+
+
+async def test_quick_add_is_per_user(client: TestClient, session: AsyncSession) -> None:
+    """One person's staples must never appear on another person's dashboard."""
+    food = await make_food(session, name="Oats, rolled", source_id="oats")
+    mine = onboarded(client, "quick-mine@example.com")
+    theirs = onboarded(client, "quick-theirs@example.com")
+
+    client.post(
+        "/api/v1/diary",
+        json={"food_id": str(food.id), "meal_slot": "breakfast", "quantity_grams": 60},
+        headers=mine,
+    )
+
+    assert client.get("/api/v1/foods/quick-add", headers=mine).json() != []
+    assert client.get("/api/v1/foods/quick-add", headers=theirs).json() == []
+
+
+async def test_quick_add_route_is_not_swallowed_by_the_food_detail_route(
+    client: TestClient,
+) -> None:
+    """Regression: FastAPI matches routes in definition order.
+
+    Declared after `/{food_id}`, this path would be parsed as a UUID and answer
+    422 forever. The bug is invisible until someone reorders the file.
+    """
+    response = client.get("/api/v1/foods/quick-add", headers=onboarded(client, "quick-route@e.com"))
+
+    assert response.status_code == 200

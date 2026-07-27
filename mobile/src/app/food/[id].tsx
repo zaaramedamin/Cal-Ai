@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: color.hairline,
   },
-  slotChipSelected: { backgroundColor: color.ink, borderColor: color.ink },
+  slotChipSelected: { backgroundColor: color.accent, borderColor: color.accent },
   slotChipLabel: { ...text.label, fontSize: 13 },
   slotChipLabelSelected: { color: color.onDark },
   portions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: color.hairline,
   },
-  portionSelected: { borderColor: color.clay, backgroundColor: color.inkWash },
+  portionSelected: { borderColor: color.accent, backgroundColor: color.accentTint },
   portionLabel: { fontSize: 13 },
   portionGrams: { ...text.bodyMuted, fontSize: 11 },
   table: {

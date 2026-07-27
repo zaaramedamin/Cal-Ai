@@ -480,7 +480,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     borderRadius: radius.pill,
   },
-  toggleOptionSelected: { backgroundColor: color.ink },
+  toggleOptionSelected: { backgroundColor: color.accent },
   toggleLabel: { ...text.label, fontSize: 13, color: color.inkMuted },
   toggleLabelSelected: { color: color.onDark },
 

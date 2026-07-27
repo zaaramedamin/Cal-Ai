@@ -1,6 +1,6 @@
 """Progress: streaks, averages, BMI."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -154,7 +154,8 @@ async def test_average_ignores_empty_days(client: TestClient, session: AsyncSess
     """
     food = await make_food(session)
     headers = onboarded(client)
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    # UTC, matching the profile's declared timezone — see test_diary.profile_today.
+    yesterday = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
 
     for day in (None, yesterday):
         payload = {"food_id": str(food.id), "meal_slot": "dinner", "quantity_grams": 400}

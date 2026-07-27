@@ -114,6 +114,23 @@ export function searchFoods(query: string): Promise<FoodSearchResponse> {
   );
 }
 
+export interface QuickAddFood extends FoodSearchResult {
+  /** The amount used last time, so a chip can log without asking. */
+  last_quantity_grams: number;
+  last_meal_slot: MealSlot;
+  times_logged: number;
+}
+
+/**
+ * The user's own staples, ranked by how often they log them.
+ *
+ * Empty for a new account, which is correct — quick-add is built from history
+ * and has nothing to offer until there is some.
+ */
+export function getQuickAdd(): Promise<QuickAddFood[]> {
+  return apiRequest<QuickAddFood[]>('/api/v1/foods/quick-add', { authenticated: true });
+}
+
 export function getFood(foodId: string): Promise<Food> {
   return apiRequest<Food>(`/api/v1/foods/${foodId}`, { authenticated: true });
 }

@@ -7,7 +7,7 @@
  * otherwise sit oddly far apart in the normal case where nothing is wrong.
  */
 
-import { forwardRef } from 'react';
+import { forwardRef, useState } from 'react';
 import { StyleSheet, Text, TextInput, type TextInputProps, View } from 'react-native';
 
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
@@ -24,13 +24,22 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   ref,
 ) {
   const invalid = Boolean(error);
+  // Focus is tracked in state rather than left to the platform default,
+  // because the native highlight differs per OS and neither one matches the
+  // accent. A field you are typing in should look unmistakably active.
+  const [focused, setFocused] = useState(false);
 
   return (
     <View style={styles.wrapper}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         ref={ref}
-        style={[styles.input, invalid && styles.inputInvalid, style]}
+        style={[
+          styles.input,
+          focused && styles.inputFocused,
+          invalid && styles.inputInvalid,
+          style,
+        ]}
         placeholderTextColor={color.inkFaint}
         // Announces the error to a screen reader instead of relying on the red
         // border, which conveys nothing to someone who cannot see it.
@@ -38,6 +47,14 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
         accessibilityHint={hint}
         aria-invalid={invalid}
         {...inputProps}
+        onFocus={(event) => {
+          setFocused(true);
+          inputProps.onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setFocused(false);
+          inputProps.onBlur?.(event);
+        }}
       />
       {invalid ? (
         <Text style={styles.error} accessibilityRole="alert">
@@ -57,6 +74,11 @@ const styles = StyleSheet.create({
   label: {
     ...text.overline,
     color: color.inkMuted,
+  },
+  inputFocused: {
+    borderColor: color.accent,
+    borderWidth: 1.5,
+    backgroundColor: color.surface,
   },
   input: {
     ...text.body,

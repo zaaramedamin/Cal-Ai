@@ -65,6 +65,21 @@ class FoodSearchResult(BaseModel):
     fat_g: float
 
 
+class QuickAddFood(FoodSearchResult):
+    """A food the user logs often, with everything needed to re-log it.
+
+    `last_quantity_grams` is the field that makes this worth having. A chip that
+    only carries a food id still costs a trip through the portion screen; one
+    that remembers the amount turns repeating breakfast into a single tap.
+    """
+
+    last_quantity_grams: float
+    last_meal_slot: str
+    #: Shown on the chip so the user can see *why* it is being offered, and so a
+    #: one-off from last week is visibly different from a daily staple.
+    times_logged: int
+
+
 class FoodSearchResponse(BaseModel):
     query: str
     results: list[FoodSearchResult]

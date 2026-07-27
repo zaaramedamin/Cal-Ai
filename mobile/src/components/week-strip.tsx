@@ -10,7 +10,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { addDays, localDateString } from '@/api/diary';
-import { color, radius, space } from '@/theme/tokens';
+import { color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily } from '@/theme/typography';
 
 interface WeekStripProps {
@@ -32,6 +32,7 @@ export function WeekStrip({ selected, onSelect }: WeekStripProps) {
     <View style={styles.row}>
       {days.map((day) => {
         const isSelected = day === selected;
+        const isToday = day === today;
         const [year, month, date] = day.split('-').map(Number);
         const weekday = new Date(year, month - 1, date).getDay();
 
@@ -47,7 +48,15 @@ export function WeekStrip({ selected, onSelect }: WeekStripProps) {
             <Text style={[styles.letter, isSelected && styles.letterSelected]}>
               {DAY_LETTERS[weekday]}
             </Text>
-            <View style={[styles.circle, isSelected && styles.circleSelected]}>
+            <View
+              style={[
+                styles.circle,
+                // Today keeps a marker even when another day is selected —
+                // otherwise scrolling back loses your anchor in the week.
+                isToday && !isSelected && styles.circleToday,
+                isSelected && styles.circleSelected,
+              ]}
+            >
               <Text style={[styles.date, isSelected && styles.dateSelected]}>{date}</Text>
             </View>
           </Pressable>
@@ -73,20 +82,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: color.inkFaint,
   },
-  letterSelected: { color: color.ink },
+  letterSelected: { color: color.accent },
   circle: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: color.surface,
   },
-  circleSelected: { backgroundColor: color.ink },
+  circleSelected: { backgroundColor: color.accent, ...elevation.mid },
   date: {
     fontFamily: fontFamily.semiBold,
     fontSize: 14,
     color: color.inkMuted,
   },
+  circleToday: { borderWidth: 1.5, borderColor: color.accentTintStrong },
   dateSelected: { color: color.onDark },
 });

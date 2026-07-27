@@ -179,7 +179,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   track: { flex: 1, height: 6, borderRadius: radius.pill, backgroundColor: color.wash },
-  fill: { height: 6, borderRadius: radius.pill, backgroundColor: color.ink },
+  fill: { height: 6, borderRadius: radius.pill, backgroundColor: color.accent },
 
   step: { flex: 1 },
   stepTitle: {
@@ -203,7 +203,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: color.wash,
   },
-  choiceSelected: { backgroundColor: color.ink },
+  choiceSelected: { backgroundColor: color.accent },
   choicePressed: { opacity: 0.75 },
   choiceIcon: { width: 26, textAlign: 'center' },
   choiceText: { flex: 1, gap: 2 },

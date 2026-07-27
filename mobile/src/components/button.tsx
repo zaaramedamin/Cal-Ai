@@ -1,15 +1,22 @@
 /**
- * Primary button.
+ * Buttons.
  *
- * `Pressable` rather than `TouchableOpacity`: it exposes a `pressed` state we can
- * style deliberately (a colour shift to `clayDeep`) instead of the blanket
- * opacity fade, which washes out the label as well as the background.
+ * Three variants, and the restraint is the point: `primary` is the indigo pill
+ * that says "this is the thing to do here", `secondary` is a quiet tinted pill
+ * for the alternative, and `ghost` is text-only for the escape hatch. A screen
+ * showing two primaries is a screen that has not decided what it wants.
+ *
+ * Presses spring inward rather than fading. A fading button reads as disabling
+ * itself under your thumb; one that presses in reads as accepting the touch.
  */
 
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
+import { PressableScale } from '@/components/motion';
+import { HIT_SLOP_MIN, color, elevation, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
+
+type Variant = 'primary' | 'secondary' | 'ghost';
 
 interface ButtonProps {
   label: string;
@@ -17,52 +24,68 @@ interface ButtonProps {
   disabled?: boolean;
   /** Shows a spinner and blocks presses. Use while a submit is in flight. */
   loading?: boolean;
+  variant?: Variant;
+  /** Optional leading glyph, already rendered — usually an icon element. */
+  icon?: React.ReactNode;
 }
 
-export function Button({ label, onPress, disabled = false, loading = false }: ButtonProps) {
+export function Button({
+  label,
+  onPress,
+  disabled = false,
+  loading = false,
+  variant = 'primary',
+  icon,
+}: ButtonProps) {
   // Blocking presses while loading is what prevents a double-tap creating two
   // accounts, or firing two logins that each mint a session.
   const inert = disabled || loading;
+  const onAccent = variant === 'primary';
 
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       disabled={inert}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: inert, busy: loading }}
-      style={({ pressed }) => [styles.base, pressed && styles.pressed, inert && styles.disabled]}
+      style={[styles.base, styles[variant], inert && styles.disabled]}
     >
       {loading ? (
-        <ActivityIndicator color={color.onDark} />
+        <ActivityIndicator color={onAccent ? color.onDark : color.accent} />
       ) : (
-        <Text style={styles.label}>{label}</Text>
+        <View style={styles.content}>
+          {icon}
+          <Text style={[styles.label, onAccent ? styles.labelOnAccent : styles.labelOnLight]}>
+            {label}
+          </Text>
+        </View>
       )}
-    </Pressable>
+    </PressableScale>
   );
 }
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: 52,
+    minHeight: 54,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: space.xl,
-    // Black pill — the single action treatment of the whole app. One button
-    // style everywhere is what makes the primary action instantly findable.
-    backgroundColor: color.ink,
     borderRadius: radius.pill,
     minWidth: HIT_SLOP_MIN,
   },
-  pressed: {
-    opacity: 0.85,
-  },
-  disabled: {
-    opacity: 0.35,
-  },
-  label: {
-    ...text.label,
-    fontSize: 16,
-    color: color.onDark,
-  },
+  content: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+
+  // The indigo pill. Lifted, because the primary action should look like it
+  // sits above the page rather than being painted onto it.
+  primary: { backgroundColor: color.accent, ...elevation.mid },
+  // Same shape, no weight, accent-tinted. Reads as available but secondary.
+  secondary: { backgroundColor: color.accentTint },
+  ghost: { backgroundColor: 'transparent', minHeight: HIT_SLOP_MIN },
+
+  disabled: { opacity: 0.4 },
+
+  label: { ...text.label, fontSize: 16 },
+  labelOnAccent: { color: color.onDark },
+  labelOnLight: { color: color.accent },
 });

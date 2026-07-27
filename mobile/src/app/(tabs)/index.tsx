@@ -1,10 +1,15 @@
 /**
- * Home — the CalDiet-style dashboard.
+ * Home — the dashboard.
  *
- * Top to bottom: header with wordmark and streak flame, week strip, the calorie
- * ring card, three macro tiles with mini rings, and the day's logged food.
- * A floating black + button starts a log; it infers the meal slot from the time
- * of day, which the food screen lets the user override.
+ * Top to bottom: greeting and streak, week strip, the calorie ring, three macro
+ * tiles on tinted surfaces, quick-add chips, then the day's food.
+ *
+ * **Quick-add is the most important thing on this screen after the ring.** The
+ * commonest act in a food tracker is repeating yesterday, and without these
+ * chips that act costs six taps: open search, type, wait, choose, set the
+ * amount, confirm. Each chip carries the food *and* the amount last used, so it
+ * costs one. Everything else here is reporting; this is the only part that
+ * saves time.
  */
 
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -12,6 +17,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
 import {
@@ -19,16 +25,20 @@ import {
   type DiaryEntry,
   MEAL_LABELS,
   type MealSlot,
+  type QuickAddFood,
   deleteEntry,
   getDay,
+  getQuickAdd,
   localDateString,
+  logFood,
 } from '@/api/diary';
 import { getProgress } from '@/api/progress';
 import { Card } from '@/components/card';
+import { CountUp, EnterUp, GrowBar, PressableScale } from '@/components/motion';
 import { ProgressRing } from '@/components/progress-ring';
 import { Screen } from '@/components/screen';
 import { WeekStrip } from '@/components/week-strip';
-import { HIT_SLOP_MIN, cardShadow, color, radius, space } from '@/theme/tokens';
+import { HIT_SLOP_MIN, color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
 type State =
@@ -45,12 +55,25 @@ function slotForNow(): MealSlot {
   return 'dinner';
 }
 
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const [day, setDay] = useState(localDateString());
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [streak, setStreak] = useState<number | null>(null);
+  const [quickAdd, setQuickAdd] = useState<QuickAddFood[]>([]);
+  const [addingId, setAddingId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const reload = useCallback(async () => {
+    setState({ kind: 'ready', summary: await getDay(day) });
+  }, [day]);
 
   useFocusEffect(
     useCallback(() => {
@@ -74,8 +97,8 @@ export default function HomeScreen() {
         }
       })();
 
-      // The streak is decoration, not content: it renders whenever it arrives
-      // and its failure must never block the dashboard.
+      // Streak and quick-add are both decoration in the strict sense: the screen
+      // is complete without them, so neither failure may block the day loading.
       (async () => {
         try {
           const progress = await getProgress();
@@ -85,11 +108,45 @@ export default function HomeScreen() {
         }
       })();
 
+      (async () => {
+        try {
+          const foods = await getQuickAdd();
+          if (!cancelled) setQuickAdd(foods);
+        } catch {
+          /* the chips simply don't render */
+        }
+      })();
+
       return () => {
         cancelled = true;
       };
     }, [day, router]),
   );
+
+  async function handleQuickAdd(food: QuickAddFood) {
+    setAddingId(food.id);
+    try {
+      await logFood({
+        foodId: food.id,
+        // The slot comes from the clock, not from last time: porridge logged as
+        // breakfast yesterday is still breakfast today, but a snack eaten at
+        // 8pm last week should not be filed as a snack at 8am.
+        mealSlot: slotForNow(),
+        quantityGrams: food.last_quantity_grams,
+        localDate: day,
+      });
+      await reload();
+      // Refreshed after logging, because this log may have changed the ranking.
+      setQuickAdd(await getQuickAdd());
+    } catch (caught) {
+      Alert.alert(
+        'Could not log that',
+        caught instanceof ApiError ? caught.userMessage : 'Check your connection and try again.',
+      );
+    } finally {
+      setAddingId(null);
+    }
+  }
 
   function confirmDelete(entry: DiaryEntry) {
     Alert.alert('Delete entry?', `Remove ${entry.food_name}?`, [
@@ -101,7 +158,7 @@ export default function HomeScreen() {
           void (async () => {
             try {
               await deleteEntry(entry.id);
-              setState({ kind: 'ready', summary: await getDay(day) });
+              await reload();
             } catch {
               Alert.alert('Could not delete that entry', 'Check your connection and try again.');
             }
@@ -113,13 +170,17 @@ export default function HomeScreen() {
 
   return (
     <Screen>
-      {/* Header: wordmark + streak flame. */}
       <View style={styles.header}>
-        <Text style={styles.wordmark}>CalAi</Text>
-        <View style={styles.streakPill}>
-          <Ionicons name="flame" size={16} color={color.flame} />
-          <Text style={styles.streakCount}>{streak ?? '–'}</Text>
+        <View>
+          <Text style={styles.greeting}>{greeting()}</Text>
+          <Text style={styles.wordmark}>CalAi</Text>
         </View>
+        {streak !== null && streak > 0 && (
+          <Animated.View entering={FadeIn.duration(300)} style={styles.streakPill}>
+            <Ionicons name="flame" size={16} color={color.flame} />
+            <Text style={styles.streakCount}>{streak}</Text>
+          </Animated.View>
+        )}
       </View>
 
       <WeekStrip selected={day} onSelect={setDay} />
@@ -137,22 +198,32 @@ export default function HomeScreen() {
         </Card>
       )}
 
-      {state.kind === 'ready' && <Dashboard summary={state.summary} onDelete={confirmDelete} />}
-
-      {/* The floating log button — the app's most-used control, so it is the
-          largest target on screen and never scrolls away. It now opens a choice
-          of two ways to log, because photo and search are genuinely different
-          starting points rather than one being a mode of the other. */}
-      {menuOpen && (
-        <Pressable
-          onPress={() => setMenuOpen(false)}
-          accessibilityLabel="Close menu"
-          style={styles.scrim}
+      {state.kind === 'ready' && (
+        <Dashboard
+          summary={state.summary}
+          quickAdd={quickAdd}
+          addingId={addingId}
+          onQuickAdd={(food) => void handleQuickAdd(food)}
+          onDelete={confirmDelete}
         />
       )}
 
       {menuOpen && (
-        <View style={styles.menu}>
+        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)}>
+          <Pressable
+            onPress={() => setMenuOpen(false)}
+            accessibilityLabel="Close menu"
+            style={styles.scrim}
+          />
+        </Animated.View>
+      )}
+
+      {menuOpen && (
+        <Animated.View
+          entering={FadeIn.duration(160)}
+          exiting={FadeOut.duration(120)}
+          style={styles.menu}
+        >
           <FabAction
             icon="camera"
             label="Scan a meal"
@@ -169,18 +240,19 @@ export default function HomeScreen() {
               router.push({ pathname: '/search', params: { slot: slotForNow(), day } });
             }}
           />
-        </View>
+        </Animated.View>
       )}
 
-      <Pressable
+      <PressableScale
         onPress={() => setMenuOpen((open) => !open)}
         accessibilityRole="button"
         accessibilityLabel={menuOpen ? 'Close log menu' : 'Log food'}
         accessibilityState={{ expanded: menuOpen }}
-        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+        style={styles.fab}
+        scaleTo={0.92}
       >
         <Ionicons name={menuOpen ? 'close' : 'add'} size={30} color={color.onDark} />
-      </Pressable>
+      </PressableScale>
     </Screen>
   );
 }
@@ -196,11 +268,11 @@ function FabAction({
   onPress: () => void;
 }) {
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => [styles.menuRow, pressed && styles.fabPressed]}
+      style={styles.menuRow}
     >
       {/* The label is a tap target too, not just a caption — a bare icon here
           would make the user guess which circle is which. */}
@@ -210,15 +282,21 @@ function FabAction({
       <View style={styles.menuIcon}>
         <Ionicons name={icon} size={22} color={color.onDark} />
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
 function Dashboard({
   summary,
+  quickAdd,
+  addingId,
+  onQuickAdd,
   onDelete,
 }: {
   summary: DaySummary;
+  quickAdd: QuickAddFood[];
+  addingId: string | null;
+  onQuickAdd: (food: QuickAddFood) => void;
   onDelete: (entry: DiaryEntry) => void;
 }) {
   const eaten = summary.totals.kcal;
@@ -231,93 +309,126 @@ function Dashboard({
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      {/* The calorie ring card. */}
-      <Card style={styles.calorieCard}>
-        <View style={styles.calorieText}>
-          <Text style={text.hero}>{Math.abs(Math.round(remaining)).toLocaleString()}</Text>
-          <Text style={styles.calorieLabel}>
-            {over ? 'Calories over' : 'Calories left'}
-          </Text>
-          <Text style={styles.calorieSub}>
-            {Math.round(eaten).toLocaleString()} of {summary.target_calories.toLocaleString()} eaten
-          </Text>
-        </View>
-        <ProgressRing
-          progress={summary.target_calories > 0 ? eaten / summary.target_calories : 0}
-          size={104}
-          strokeWidth={10}
-          tint={over ? color.danger : color.ink}
-        >
-          <Ionicons name="flame" size={26} color={over ? color.danger : color.ink} />
-        </ProgressRing>
-      </Card>
+      <EnterUp index={0}>
+        <Card style={styles.calorieCard}>
+          <View style={styles.calorieText}>
+            <CountUp value={Math.abs(Math.round(remaining))} style={styles.calorieValue} />
+            <Text style={styles.calorieLabel}>{over ? 'Calories over' : 'Calories left'}</Text>
+            <Text style={styles.calorieSub}>
+              {Math.round(eaten).toLocaleString()} of{' '}
+              {summary.target_calories.toLocaleString()} eaten
+            </Text>
+          </View>
+          <ProgressRing
+            progress={summary.target_calories > 0 ? eaten / summary.target_calories : 0}
+            size={112}
+            strokeWidth={11}
+            tint={over ? color.warning : color.accent}
+          >
+            <Ionicons name="flame" size={26} color={over ? color.warning : color.accent} />
+          </ProgressRing>
+        </Card>
+      </EnterUp>
 
       {/* Macro tiles. "Left" mirrors the calorie card: this screen answers
           "what can I still eat", the Progress tab answers "what have I done". */}
-      <View style={styles.macroRow}>
-        <MacroTile
-          label="Protein"
-          eaten={summary.totals.protein_g}
-          target={summary.target_macros.protein_g}
-          tint={color.protein}
-          icon="lightning-bolt"
-        />
-        <MacroTile
-          label="Carbs"
-          eaten={summary.totals.carbs_g}
-          target={summary.target_macros.carbs_g}
-          tint={color.carbs}
-          icon="barley"
-        />
-        <MacroTile
-          label="Fat"
-          eaten={summary.totals.fat_g}
-          target={summary.target_macros.fat_g}
-          tint={color.fat}
-          icon="water"
-        />
-      </View>
+      <EnterUp index={1}>
+        <View style={styles.macroRow}>
+          <MacroTile
+            label="Protein"
+            eaten={summary.totals.protein_g}
+            target={summary.target_macros.protein_g}
+            tint={color.protein}
+            surface={color.proteinTint}
+            icon="lightning-bolt"
+          />
+          <MacroTile
+            label="Carbs"
+            eaten={summary.totals.carbs_g}
+            target={summary.target_macros.carbs_g}
+            tint={color.carbs}
+            surface={color.carbsTint}
+            icon="barley"
+          />
+          <MacroTile
+            label="Fat"
+            eaten={summary.totals.fat_g}
+            target={summary.target_macros.fat_g}
+            tint={color.fat}
+            surface={color.fatTint}
+            icon="water"
+          />
+        </View>
+      </EnterUp>
+
+      {quickAdd.length > 0 && (
+        <EnterUp index={2}>
+          <View style={styles.quickAddBlock}>
+            <Text style={styles.sectionTitle}>Your usuals</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRail}
+            >
+              {quickAdd.map((food) => (
+                <QuickAddChip
+                  key={food.id}
+                  food={food}
+                  busy={addingId === food.id}
+                  onPress={() => onQuickAdd(food)}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        </EnterUp>
+      )}
 
       <Text style={styles.sectionTitle}>Logged today</Text>
 
       {entries.length === 0 ? (
-        <Card>
-          <Text style={text.label}>Nothing logged yet</Text>
-          <Text style={[text.bodyMuted, styles.emptyBody]}>
-            Tap the + button to search a food and log your first meal of the day.
-          </Text>
-        </Card>
+        <EnterUp index={3}>
+          <Card>
+            <Text style={text.label}>Nothing logged yet</Text>
+            <Text style={[text.bodyMuted, styles.emptyBody]}>
+              {quickAdd.length > 0
+                ? 'Tap one of your usuals above, or use + to scan a meal.'
+                : 'Tap + to photograph a meal or search for a food.'}
+            </Text>
+          </Card>
+        </EnterUp>
       ) : (
-        entries.map((entry) => (
-          <Pressable
-            key={entry.id}
-            onLongPress={() => onDelete(entry)}
-            accessibilityRole="button"
-            accessibilityHint="Long press to delete"
-          >
-            <Card style={styles.entryCard}>
-              <View style={styles.entryText}>
-                <Text style={text.label} numberOfLines={1}>
-                  {entry.food_name}
-                </Text>
-                <Text style={styles.entryMeta}>
-                  {MEAL_LABELS[entry.meal_slot]} ·{' '}
-                  {entry.servings
-                    ? `${entry.servings} serving${entry.servings === 1 ? '' : 's'}`
-                    : `${Math.round(entry.quantity_grams)} g`}
-                </Text>
-                <View style={styles.chipRow}>
-                  <MacroChip tint={color.protein} value={entry.protein_g} />
-                  <MacroChip tint={color.carbs} value={entry.carbs_g} />
-                  <MacroChip tint={color.fat} value={entry.fat_g} />
+        entries.map((entry, index) => (
+          <EnterUp key={entry.id} index={3 + index}>
+            <PressableScale
+              onLongPress={() => onDelete(entry)}
+              accessibilityRole="button"
+              accessibilityHint="Long press to delete"
+              scaleTo={0.985}
+            >
+              <Card style={styles.entryCard}>
+                <View style={styles.entryText}>
+                  <Text style={text.label} numberOfLines={1}>
+                    {entry.food_name}
+                  </Text>
+                  <Text style={styles.entryMeta}>
+                    {MEAL_LABELS[entry.meal_slot]} ·{' '}
+                    {entry.servings
+                      ? `${entry.servings} serving${entry.servings === 1 ? '' : 's'}`
+                      : `${Math.round(entry.quantity_grams)} g`}
+                  </Text>
+                  <View style={styles.chipRow}>
+                    <MacroChip tint={color.protein} value={entry.protein_g} />
+                    <MacroChip tint={color.carbs} value={entry.carbs_g} />
+                    <MacroChip tint={color.fat} value={entry.fat_g} />
+                  </View>
                 </View>
-              </View>
-              <View style={styles.entryKcalBlock}>
-                <Text style={text.heading}>{Math.round(entry.kcal)}</Text>
-                <Text style={styles.entryKcalUnit}>kcal</Text>
-              </View>
-            </Card>
-          </Pressable>
+                <View style={styles.entryKcalBlock}>
+                  <Text style={text.heading}>{Math.round(entry.kcal)}</Text>
+                  <Text style={styles.entryKcalUnit}>kcal</Text>
+                </View>
+              </Card>
+            </PressableScale>
+          </EnterUp>
         ))
       )}
 
@@ -330,47 +441,87 @@ function Dashboard({
   );
 }
 
+function QuickAddChip({
+  food,
+  busy,
+  onPress,
+}: {
+  food: QuickAddFood;
+  busy: boolean;
+  onPress: () => void;
+}) {
+  const kcal = Math.round((food.kcal * food.last_quantity_grams) / 100);
+
+  return (
+    <PressableScale
+      onPress={onPress}
+      disabled={busy}
+      accessibilityRole="button"
+      accessibilityLabel={`Log ${Math.round(food.last_quantity_grams)} grams of ${food.name}`}
+      style={[styles.chip, busy && styles.chipBusy]}
+    >
+      <View style={styles.chipPlus}>
+        <Ionicons name={busy ? 'checkmark' : 'add'} size={15} color={color.accent} />
+      </View>
+      <View style={styles.chipText}>
+        <Text style={styles.chipName} numberOfLines={1}>
+          {food.name}
+        </Text>
+        {/* Both facts on the chip, because a one-tap action must show exactly
+            what it will do before it is tapped. */}
+        <Text style={styles.chipMeta}>
+          {Math.round(food.last_quantity_grams)} g · {kcal} kcal
+        </Text>
+      </View>
+    </PressableScale>
+  );
+}
+
 function MacroTile({
   label,
   eaten,
   target,
   tint,
+  surface,
   icon,
 }: {
   label: string;
   eaten: number;
   target: number;
   tint: string;
+  surface: string;
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
 }) {
   const left = Math.round(target - eaten);
   const over = left < 0;
+  const fraction = target > 0 ? eaten / target : 0;
 
   return (
-    <Card compact style={styles.macroTile}>
-      <Text style={styles.macroValue}>
-        {Math.abs(left)}g
+    // Tinted rather than white. Three identical white tiles need their labels
+    // read; three tinted ones are told apart peripherally, which is how they are
+    // actually used — glanced at, not studied.
+    <View style={[styles.macroTile, { backgroundColor: surface }]}>
+      <View style={styles.macroHead}>
+        <MaterialCommunityIcons name={icon} size={15} color={tint} />
+        <Text style={styles.macroLabel}>{label}</Text>
+      </View>
+      <Text style={[styles.macroValue, { color: tint }]}>
+        {Math.abs(left)}
+        <Text style={styles.macroUnit}>g</Text>
       </Text>
-      <Text style={styles.macroLabel}>
-        {label} {over ? 'over' : 'left'}
-      </Text>
-      <ProgressRing
-        progress={target > 0 ? eaten / target : 0}
-        size={44}
-        strokeWidth={5}
-        tint={tint}
-      >
-        <MaterialCommunityIcons name={icon} size={16} color={tint} />
-      </ProgressRing>
-    </Card>
+      <Text style={styles.macroCaption}>{over ? 'over' : 'left'}</Text>
+      <View style={styles.macroTrack}>
+        <GrowBar fraction={fraction} tint={tint} height={5} />
+      </View>
+    </View>
   );
 }
 
 function MacroChip({ tint, value }: { tint: string; value: number }) {
   return (
-    <View style={styles.chip}>
+    <View style={styles.macroDotRow}>
       <View style={[styles.chipDot, { backgroundColor: tint }]} />
-      <Text style={styles.chipText}>{Math.round(value)}g</Text>
+      <Text style={styles.chipDotText}>{Math.round(value)}g</Text>
     </View>
   );
 }
@@ -382,25 +533,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: space.md,
   },
+  greeting: { ...text.bodyMuted, fontSize: 13 },
   wordmark: {
     fontFamily: fontFamily.extraBold,
-    fontSize: 22,
-    letterSpacing: -0.5,
+    fontSize: 24,
+    letterSpacing: -0.6,
     color: color.ink,
   },
   streakPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
-    backgroundColor: color.surface,
+    backgroundColor: color.flameTint,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
     borderRadius: radius.pill,
-    ...cardShadow,
   },
-  streakCount: { ...text.numeric, fontSize: 15 },
+  streakCount: { ...text.numeric, fontSize: 15, color: color.flame },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  scroll: { paddingTop: space.lg, paddingBottom: 96, gap: space.md },
+  scroll: { paddingTop: space.lg, paddingBottom: 110, gap: space.md },
   errorCard: { marginTop: space.lg },
   errorBody: { marginTop: space.xs },
 
@@ -411,15 +562,64 @@ const styles = StyleSheet.create({
     padding: space.xl,
   },
   calorieText: { gap: 2, flexShrink: 1 },
+  calorieValue: {
+    fontFamily: fontFamily.extraBold,
+    fontSize: 46,
+    letterSpacing: -1.4,
+    color: color.ink,
+  },
   calorieLabel: { ...text.label, fontSize: 15 },
   calorieSub: { ...text.bodyMuted, fontSize: 13, marginTop: space.xs },
 
   macroRow: { flexDirection: 'row', gap: space.md },
-  macroTile: { flex: 1, alignItems: 'flex-start', gap: space.xs },
-  macroValue: { fontFamily: fontFamily.bold, fontSize: 18, color: color.ink },
-  macroLabel: { ...text.bodyMuted, fontSize: 11, marginBottom: space.sm },
+  macroTile: {
+    flex: 1,
+    gap: 2,
+    padding: space.md,
+    borderRadius: radius.lg,
+  },
+  macroHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  macroLabel: { ...text.overline, fontSize: 10, color: color.inkMuted },
+  macroValue: { fontFamily: fontFamily.extraBold, fontSize: 22, letterSpacing: -0.5 },
+  macroUnit: { fontFamily: fontFamily.bold, fontSize: 13 },
+  macroCaption: { ...text.bodyMuted, fontSize: 11 },
+  macroTrack: {
+    height: 5,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255, 255, 255, 0.65)',
+    marginTop: space.sm,
+    overflow: 'hidden',
+  },
 
-  sectionTitle: { ...text.heading, marginTop: space.md },
+  quickAddBlock: { gap: space.sm },
+  chipRail: { gap: space.sm, paddingRight: space.lg },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    maxWidth: 210,
+    paddingLeft: space.sm,
+    paddingRight: space.lg,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+    backgroundColor: color.surface,
+    minHeight: HIT_SLOP_MIN,
+    ...elevation.low,
+  },
+  chipBusy: { opacity: 0.6 },
+  chipPlus: {
+    width: 26,
+    height: 26,
+    borderRadius: radius.pill,
+    backgroundColor: color.accentTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipText: { flexShrink: 1 },
+  chipName: { ...text.label, fontSize: 13 },
+  chipMeta: { ...text.bodyMuted, fontSize: 11 },
+
+  sectionTitle: { ...text.heading, marginTop: space.sm },
 
   entryCard: {
     flexDirection: 'row',
@@ -430,25 +630,23 @@ const styles = StyleSheet.create({
   entryText: { flex: 1, gap: 3 },
   entryMeta: { ...text.bodyMuted, fontSize: 12 },
   chipRow: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  macroDotRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   chipDot: { width: 7, height: 7, borderRadius: radius.pill },
-  chipText: { ...text.numeric, fontSize: 12, color: color.inkMuted },
+  chipDotText: { ...text.numeric, fontSize: 12, color: color.inkMuted },
   entryKcalBlock: { alignItems: 'flex-end' },
   entryKcalUnit: { ...text.bodyMuted, fontSize: 11 },
 
   emptyBody: { marginTop: space.xs, fontSize: 13 },
   partialNote: { ...text.bodyMuted, fontSize: 12, marginTop: space.sm },
 
-  // Covers the whole screen so a tap anywhere dismisses the menu. Barely tinted:
-  // enough to signal "this is modal", not enough to hide the day underneath.
   scrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(23, 24, 26, 0.18)',
+    backgroundColor: 'rgba(20, 22, 29, 0.20)',
   },
   menu: {
     position: 'absolute',
     right: space.xl,
-    bottom: space.xl + 60 + space.md,
+    bottom: space.xl + 62 + space.md,
     alignItems: 'flex-end',
     gap: space.md,
   },
@@ -458,37 +656,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingVertical: space.sm,
     borderRadius: radius.pill,
-    ...cardShadow,
-    elevation: 4,
+    ...elevation.mid,
   },
   menuLabel: { ...text.label, fontSize: 14 },
   menuIcon: {
-    width: 48,
-    height: 48,
+    width: 50,
+    height: 50,
     borderRadius: radius.pill,
-    backgroundColor: color.ink,
+    backgroundColor: color.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    ...cardShadow,
-    elevation: 4,
+    ...elevation.mid,
   },
 
   fab: {
     position: 'absolute',
     right: space.xl,
     bottom: space.xl,
-    width: 60,
-    height: 60,
+    width: 62,
+    height: 62,
     borderRadius: radius.pill,
-    backgroundColor: color.ink,
+    backgroundColor: color.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    ...cardShadow,
-    // The shadow token is tuned for cards; a floating button needs more depth
-    // to read as floating.
-    elevation: 6,
-    minWidth: HIT_SLOP_MIN,
-    minHeight: HIT_SLOP_MIN,
+    ...elevation.high,
   },
-  fabPressed: { opacity: 0.85 },
 });

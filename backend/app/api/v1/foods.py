@@ -2,18 +2,20 @@
 
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser
 from app.core.rate_limit import RateLimit
+from app.db.models.diary import DiaryEntry
 from app.db.models.food import Food
 from app.db.session import get_session
-from app.schemas.food import FoodRead, FoodSearchResponse, FoodSearchResult
+from app.schemas.food import FoodRead, FoodSearchResponse, FoodSearchResult, QuickAddFood
 from app.services.food_cache import search_foods
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,89 @@ async def search(
         results=[FoodSearchResult.model_validate(food) for food in foods],
         upstream_unavailable=upstream_unavailable,
     )
+
+
+#: How far back "what I usually eat" looks. Long enough to catch a weekly
+#: staple, short enough that a food abandoned two months ago stops being offered.
+QUICK_ADD_WINDOW_DAYS = 60
+
+
+@router.get(
+    "/quick-add",
+    response_model=list[QuickAddFood],
+    summary="Foods this user logs often, ready to re-log in one tap",
+)
+async def quick_add(
+    user: CurrentUser,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=20)] = 10,
+) -> list[QuickAddFood]:
+    """The user's own staples, with the quantity they last used.
+
+    **Why the last quantity is part of the answer.** Logging porridge again is
+    only one tap if the app already knows it was 60 g — otherwise the chip just
+    opens the portion screen and has saved nothing. The most common act in a
+    food tracker is repeating yesterday, and this endpoint exists to make that
+    act cost one tap instead of six.
+
+    Ordered by how often the food is logged, ties broken by recency, so the
+    result reads as "your usuals" rather than "your history". Frequency is the
+    better signal: the last thing eaten is often the unusual thing.
+
+    Declared above `/{food_id}` deliberately — FastAPI matches routes in
+    definition order, and the parameterised route would otherwise swallow
+    "quick-add" and try to parse it as a UUID.
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=QUICK_ADD_WINDOW_DAYS)
+
+    # One pass with window functions rather than a group-by followed by a second
+    # query for each food's latest entry. `row_number` picks the most recent row
+    # per food; `count` over the same partition counts them all.
+    ranked = (
+        select(
+            DiaryEntry.food_id.label("food_id"),
+            DiaryEntry.quantity_grams.label("quantity_grams"),
+            DiaryEntry.meal_slot.label("meal_slot"),
+            DiaryEntry.logged_at.label("logged_at"),
+            func.count().over(partition_by=DiaryEntry.food_id).label("times_logged"),
+            func.row_number()
+            .over(partition_by=DiaryEntry.food_id, order_by=DiaryEntry.logged_at.desc())
+            .label("rank"),
+        )
+        .where(
+            DiaryEntry.user_id == user.id,
+            # Recipe entries have no food_id and cannot be re-logged this way;
+            # they have their own screen.
+            DiaryEntry.food_id.is_not(None),
+            DiaryEntry.logged_at >= cutoff,
+        )
+        .subquery()
+    )
+
+    result = await session.execute(
+        select(Food, ranked.c.quantity_grams, ranked.c.meal_slot, ranked.c.times_logged)
+        .join(ranked, Food.id == ranked.c.food_id)
+        .where(ranked.c.rank == 1)
+        .order_by(ranked.c.times_logged.desc(), ranked.c.logged_at.desc())
+        .limit(limit)
+    )
+
+    return [
+        QuickAddFood(
+            id=food.id,
+            source=food.source,
+            name=food.name,
+            brand=food.brand,
+            kcal=food.kcal,
+            protein_g=food.protein_g,
+            carbs_g=food.carbs_g,
+            fat_g=food.fat_g,
+            last_quantity_grams=float(quantity),
+            last_meal_slot=slot,
+            times_logged=times,
+        )
+        for food, quantity, slot, times in result
+    ]
 
 
 @router.get("/{food_id}", response_model=FoodRead, summary="Food detail with portions")

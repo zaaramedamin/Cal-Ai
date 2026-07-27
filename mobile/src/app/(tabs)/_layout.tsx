@@ -11,7 +11,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
 
-import { cardShadow, color } from '@/theme/tokens';
+import { color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily } from '@/theme/typography';
 
 export default function TabsLayout() {
@@ -19,12 +19,20 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: color.ink,
+        // Indigo marks the active tab, matching every other 'this is live'
+        // signal in the app. A black active tab is indistinguishable from the
+        // label text beside it.
+        tabBarActiveTintColor: color.accent,
         tabBarInactiveTintColor: color.inkFaint,
         tabBarStyle: {
           backgroundColor: color.surface,
           borderTopWidth: 0,
-          ...cardShadow,
+          height: 64,
+          paddingTop: space.sm,
+          paddingBottom: space.sm,
+          borderTopLeftRadius: radius.lg,
+          borderTopRightRadius: radius.lg,
+          ...elevation.mid,
         },
         tabBarLabelStyle: {
           fontFamily: fontFamily.semiBold,
