@@ -239,6 +239,12 @@ If step 2 and 3 look identical, the error handling is not actually doing its job
 - **The diary snapshots nutrient values at log time** rather than recalculating from the food row.
   USDA revises values and users edit recipes; last Tuesday's lunch must not change retroactively.
   Think invoice line item, not live price lookup.
+- **A missing nutrient is `NULL`, never `0`, all the way to the screen.** If USDA doesn't report
+  fibre, the app shows `—`. Day totals flag which nutrients any entry failed to report, because a
+  total summed over holes looks authoritative and is quietly too low.
+- **Targets and recipe nutrition are computed on read, never stored.** Both are pure functions of
+  their inputs, so a stored copy goes stale the moment an input changes — and a stale calorie
+  target is worse than none.
 - **"Today" is the user's local day, never UTC.** `diary_entries.local_date` is computed server-side
   from the profile's IANA timezone. The client never dictates the date.
 - **Passwords use argon2id; refresh tokens use SHA-256.** Different hashes for different inputs.
@@ -283,9 +289,9 @@ adding a provider in Phase 7 changes that one module.
 |---|---|---|
 | 0 | Monorepo, Postgres, health endpoint, Expo app proving the pipe | ✅ |
 | 1 | Auth: register/login/refresh/logout, argon2id, JWT, secure token storage | ✅ |
-| 2 | Onboarding, BMR/TDEE/macro targets with full unit tests, results screen | |
-| 3 | USDA integration, normalization, caching, search | |
-| 4 | Diary: log to meal slots, daily summary, macro bar | |
-| 5 | Custom recipes with live nutrition totals | |
+| 2 | Onboarding, BMR/TDEE/macro targets with full unit tests, results screen | ✅ |
+| 3 | USDA integration, normalization, caching, search | ✅ |
+| 4 | Diary: log to meal slots, daily summary, macro bar | ✅ |
+| 5 | Custom recipes with live nutrition totals | ✅ |
 | 6 | Weight trends, weekly averages, streaks, empty/loading/error states throughout | |
 | 7 | Deployment, builds, screenshots | |
