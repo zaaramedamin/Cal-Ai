@@ -9,9 +9,32 @@ misunderstanding as the code cannot catch the misunderstanding.
 
 import json
 
+import httpx
 import pytest
 
-from app.services.vision import MAX_ITEM_GRAMS, VisionUnavailable, parse_vision_response
+from app.core.config import get_settings
+from app.services.vision import (
+    MAX_ITEM_GRAMS,
+    MAX_OUTPUT_TOKENS,
+    THINKING_BUDGET_TOKENS,
+    VisionClient,
+    VisionQuotaExhausted,
+    VisionUnavailable,
+    parse_vision_response,
+)
+
+
+@pytest.fixture
+def gemini_key(monkeypatch) -> None:
+    """Pretend a key is configured, so the client gets as far as the transport.
+
+    No real key is ever needed here — every request is served by a mock — but
+    without one `analyse_meal` short-circuits with VisionNotConfigured.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def gemini_response(payload: dict) -> dict:
@@ -133,3 +156,105 @@ def test_non_json_text_raises() -> None:
 def test_empty_response_raises() -> None:
     with pytest.raises(VisionUnavailable):
         parse_vision_response({})
+
+
+def test_thinking_exhausting_the_budget_is_reported_not_swallowed() -> None:
+    """The failure that made this flaky in the first place.
+
+    Current flash models think before answering and those tokens come out of the
+    same budget as the reply. When thinking uses all of it the candidate comes
+    back with no `parts` at all — which must surface as an error, not as a
+    cheerful "no food detected".
+    """
+    starved = {"candidates": [{"finishReason": "MAX_TOKENS", "index": 0}]}
+
+    with pytest.raises(VisionUnavailable, match="MAX_TOKENS"):
+        parse_vision_response(starved)
+
+
+# --------------------------------------------------------------------------- #
+# Transport: retries, and what must never be retried.
+# --------------------------------------------------------------------------- #
+
+
+class Upstream:
+    """A stand-in Gemini that serves scripted responses and counts calls."""
+
+    def __init__(self, *payloads: tuple[int, dict]) -> None:
+        self._payloads = payloads
+        self.calls = 0
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        # The last entry repeats, so a one-entry script means "always this".
+        status, body = self._payloads[min(self.calls, len(self._payloads) - 1)]
+        self.calls += 1
+        return httpx.Response(status, json=body)
+
+    def client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=httpx.MockTransport(self._handle))
+
+
+OVERLOADED = (503, {"error": "overloaded"})
+OK = (200, gemini_response({"items": [], "notes": "nothing here"}))
+
+
+async def test_retries_a_transient_upstream_error(gemini_key) -> None:
+    """Google's own 503s appeared in roughly one call in three during testing.
+
+    Without a retry each one becomes a failed scan the user sees.
+    """
+    upstream = Upstream(OVERLOADED, OK)
+    async with upstream.client() as client:
+        result = await VisionClient(client).analyse_meal("Zm9v", "image/jpeg")
+
+    assert result.notes == "nothing here"
+    assert upstream.calls == 2
+
+
+async def test_gives_up_after_the_retry(gemini_key) -> None:
+    upstream = Upstream(OVERLOADED)
+    async with upstream.client() as client:
+        with pytest.raises(VisionUnavailable, match="503"):
+            await VisionClient(client).analyse_meal("Zm9v", "image/jpeg")
+
+    assert upstream.calls == 2
+
+
+async def test_never_retries_a_quota_error(gemini_key) -> None:
+    """Retrying a spent quota just spends more of a budget shared with others."""
+    upstream = Upstream((429, {"error": "quota"}))
+    async with upstream.client() as client:
+        with pytest.raises(VisionQuotaExhausted):
+            await VisionClient(client).analyse_meal("Zm9v", "image/jpeg")
+
+    assert upstream.calls == 1
+
+
+async def test_never_retries_a_retired_model(gemini_key) -> None:
+    """Google reports a model retired for new keys as 404, not 400.
+
+    It is permanent, so a retry only doubles the latency before the same error.
+    """
+    upstream = Upstream((404, {"error": {"message": "no longer available"}}))
+    async with upstream.client() as client:
+        with pytest.raises(VisionUnavailable, match="404"):
+            await VisionClient(client).analyse_meal("Zm9v", "image/jpeg")
+
+    assert upstream.calls == 1
+
+
+async def test_request_budgets_room_for_the_answer_after_thinking(gemini_key) -> None:
+    """Guards the fix: thinking is capped strictly below the total budget."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json=gemini_response({"items": []}))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await VisionClient(client).analyse_meal("Zm9v", "image/jpeg")
+
+    config = captured["generationConfig"]  # type: ignore[index]
+    assert config["max_output_tokens"] == MAX_OUTPUT_TOKENS
+    assert config["thinkingConfig"]["thinkingBudget"] == THINKING_BUDGET_TOKENS
+    assert THINKING_BUDGET_TOKENS < MAX_OUTPUT_TOKENS

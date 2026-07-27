@@ -18,6 +18,7 @@ fix rather than an app-store release.
 Photos are analyzed and discarded — nothing is persisted server-side.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -29,6 +30,23 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+#: Current flash models think before answering, and those thinking tokens are
+#: charged against the same output budget as the reply. Observed usage on a
+#: simple photo is ~200 thinking tokens against ~30 of answer, but a crowded
+#: plate reasons for longer — and if thinking exhausts the budget the response
+#: comes back with `finishReason: MAX_TOKENS` and *no content at all*, which
+#: looks exactly like a server fault. Budget generously in both directions: the
+#: cap is a safety net, not a target, and unused tokens cost nothing.
+MAX_OUTPUT_TOKENS = 4096
+THINKING_BUDGET_TOKENS = 1024
+
+#: Google's own infrastructure returns transient 503s under load — one appeared
+#: in roughly one call in three while testing this. Retrying once turns a blip
+#: into a slightly slower scan instead of a failure the user sees.
+MAX_ATTEMPTS = 2
+RETRY_BACKOFF_SECONDS = 1.5
+RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
 
 #: Upper bound on a single detected portion. A 3 kg item on one plate is a
 #: hallucination, not a meal.
@@ -121,7 +139,9 @@ def parse_vision_response(payload: dict[str, Any]) -> VisionResult:
     try:
         text = payload["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError, TypeError) as exc:
-        # Includes the finishReason=SAFETY case, where parts is absent.
+        # Covers finishReason=SAFETY and =MAX_TOKENS, both of which return a
+        # candidate with no parts. MAX_TOKENS here means thinking ate the whole
+        # budget — see MAX_OUTPUT_TOKENS above.
         reason = (payload.get("candidates") or [{}])[0].get("finishReason", "unknown")
         raise VisionUnavailable(f"Gemini returned no content (finishReason={reason})") from exc
 
@@ -171,33 +191,72 @@ class VisionClient:
                 # Deterministic-ish output suits an extraction task; Gemini
                 # still accepts temperature, unlike current Claude models.
                 "temperature": 0.2,
-                "max_output_tokens": 1024,
+                "max_output_tokens": MAX_OUTPUT_TOKENS,
+                # Some thinking genuinely helps on a crowded plate, so it stays
+                # on — but capped, so it can never consume the whole budget and
+                # leave no room for the answer.
+                "thinkingConfig": {"thinkingBudget": THINKING_BUDGET_TOKENS},
             },
         }
 
         url = f"{BASE_URL}/models/{settings.gemini_model}:generateContent"
         client = self._client or httpx.AsyncClient(timeout=40.0)
         try:
-            response = await client.post(
-                url,
-                json=body,
-                # Key goes in a header, not the query string — query strings
-                # end up in proxy and server logs.
-                headers={"x-goog-api-key": settings.gemini_api_key},
-            )
-            if response.status_code == 429:
-                # The shared free-tier budget for the day/minute is spent.
-                raise VisionQuotaExhausted("Gemini free-tier quota exhausted")
-            response.raise_for_status()
-            return parse_vision_response(response.json())
-        except (VisionQuotaExhausted, VisionUnavailable):
-            raise
-        except httpx.HTTPStatusError as exc:
-            logger.warning("Gemini responded %s", exc.response.status_code)
-            raise VisionUnavailable(f"Gemini returned {exc.response.status_code}") from exc
-        except httpx.HTTPError as exc:
-            logger.warning("Gemini request failed: %s", exc)
-            raise VisionUnavailable("Could not reach Gemini") from exc
+            return await self._post_with_retry(client, url, body, settings.gemini_api_key)
         finally:
             if self._client is None:
                 await client.aclose()
+
+    async def _post_with_retry(
+        self, client: httpx.AsyncClient, url: str, body: dict[str, Any], api_key: str
+    ) -> VisionResult:
+        """POST once, retrying only failures that a retry can plausibly fix.
+
+        Deliberately narrow. A 429 is a spent quota and retrying makes it worse;
+        a 400 is our bug and will fail identically. Only transient upstream
+        faults and connection errors are worth a second attempt.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                response = await client.post(
+                    url,
+                    json=body,
+                    # Key goes in a header, not the query string — query strings
+                    # end up in proxy and server logs.
+                    headers={"x-goog-api-key": api_key},
+                )
+            except httpx.HTTPError as exc:
+                last_error = VisionUnavailable("Could not reach Gemini")
+                logger.warning("Gemini request failed (attempt %d): %s", attempt, exc)
+            else:
+                if response.status_code == 429:
+                    # The shared free-tier budget for the day/minute is spent.
+                    raise VisionQuotaExhausted("Gemini free-tier quota exhausted")
+
+                if response.status_code not in RETRYABLE_STATUS:
+                    if not response.is_success:
+                        # A 404 here usually means the configured model is
+                        # retired for this API key — Google reports that as
+                        # "no longer available to new users", not as a 400.
+                        logger.warning(
+                            "Gemini returned %s: %s",
+                            response.status_code,
+                            response.text[:300],
+                        )
+                        raise VisionUnavailable(f"Gemini returned {response.status_code}")
+                    return parse_vision_response(response.json())
+
+                last_error = VisionUnavailable(f"Gemini returned {response.status_code}")
+                logger.warning(
+                    "Gemini returned %s (attempt %d of %d)",
+                    response.status_code,
+                    attempt,
+                    MAX_ATTEMPTS,
+                )
+
+            if attempt < MAX_ATTEMPTS:
+                await asyncio.sleep(RETRY_BACKOFF_SECONDS)
+
+        raise last_error or VisionUnavailable("Gemini request failed")

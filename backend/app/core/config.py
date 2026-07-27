@@ -89,7 +89,15 @@ class Settings(BaseSettings):
     # instructions — unlike SECRET_KEY this must NOT prevent boot, because the
     # rest of the app works fine without it. Free key: aistudio.google.com/apikey
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+
+    # An alias, not a pinned version, and deliberately so. Google retires pinned
+    # models *for new API keys* while leaving them listed and callable by older
+    # ones — so `gemini-2.5-flash` worked for months and then 404'd for a key
+    # issued today, with the misleading message that the model does not exist.
+    # The alias tracks whatever the current flash model is and cannot rot that
+    # way. The cost is that the model can change under us; pin a version here if
+    # a future release ever regresses food recognition.
+    gemini_model: str = "gemini-flash-latest"
 
     @field_validator("secret_key")
     @classmethod
