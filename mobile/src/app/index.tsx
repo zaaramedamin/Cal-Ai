@@ -135,15 +135,8 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <View style={styles.nextUp}>
-          <Text style={text.overline}>Next</Text>
-          <Text style={styles.stepDetail}>
-            Phase 3 adds the food database, so you can search real USDA foods and log them
-            against these targets.
-          </Text>
-        </View>
-
         <View style={styles.actions}>
+          <Button label="Open today's diary" onPress={() => router.push('/diary')} />
           <Button label="Edit my details" onPress={() => router.push('/onboarding')} />
           <Pressable
             onPress={() => void signOut()}
