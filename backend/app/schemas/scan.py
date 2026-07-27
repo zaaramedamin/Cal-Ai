@@ -40,8 +40,13 @@ class ScannedItem(BaseModel):
     #: The model's visual estimate. Editable in the app before anything is logged.
     estimated_grams: float
     confidence: float
-    #: None when nothing in the cache or USDA matched. The app offers a manual
-    #: search rather than inventing values for it.
+    #: None when nothing matched and no estimate could be produced. The app
+    #: offers a manual search rather than showing numbers for it.
+    #:
+    #: When `match.source` is `ai_estimate` the numbers came from the model's own
+    #: knowledge rather than a measurement, and the app must label them. That is
+    #: why `source` is on `FoodSearchResult` — it is not decoration, it is how a
+    #: client tells a measured number from an estimated one.
     match: FoodSearchResult | None = None
 
 
@@ -49,6 +54,9 @@ class ScanResponse(BaseModel):
     items: list[ScannedItem]
     #: The model's own caveats ("sauce not visible", "no food in this photo").
     notes: str = ""
-    #: How many detected items we could not match. Surfaced so the app can say
-    #: "2 items need a manual search" instead of quietly dropping them.
+    #: How many detected items have no numbers at all. Surfaced so the app can
+    #: say "2 items need a manual search" instead of quietly dropping them.
     unmatched_count: int = 0
+    #: How many are AI estimates rather than database entries. Lets the app warn
+    #: once at the top instead of relying on the user reading every badge.
+    estimated_count: int = 0

@@ -19,7 +19,9 @@ Photos are analyzed and discarded — nothing is persisted server-side.
 """
 
 import asyncio
+import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -76,16 +78,94 @@ class VisionItem(BaseModel):
     """
 
     name: str = Field(min_length=1, max_length=80)
+    #: The same food stripped to its plainest form — "chicken breast" rather than
+    #: "grilled chicken breast". Food databases file things formally, so the
+    #: descriptive name a user recognises is a poor search key while the bare
+    #: noun is a good one. Asking the model for both costs nothing and it knows
+    #: which words are the food and which are the cooking.
+    search_term: str = Field(default="", max_length=80)
     quantity_grams: float = Field(gt=0, le=MAX_ITEM_GRAMS)
     #: The model's own certainty, 0..1. Shown to the user as a hint, never used
     #: to auto-log anything.
     confidence: float = Field(ge=0, le=1)
+
+    @property
+    def query(self) -> str:
+        """What to search the food database with."""
+        return self.search_term.strip() or self.name
 
 
 class VisionResult(BaseModel):
     items: list[VisionItem]
     #: Free-text caveats from the model ("sauce not visible", "partially eaten").
     notes: str = ""
+
+
+class EstimatedNutrition(BaseModel):
+    """Per-100 g nutrition the model produced from its own knowledge.
+
+    **This is the one place in the codebase where a nutrition value is not
+    measured, and it is deliberately quarantined.**
+
+    It exists because a scan that identifies a food no database can match would
+    otherwise be a dead end for the user. The rules that keep it honest:
+
+    * it is only ever requested for foods USDA and the cache both failed to
+      match, never as a shortcut;
+    * it is stored under `FoodSource.AI_ESTIMATE`, excluded from food search, so
+      it cannot reach anyone who did not watch it being estimated;
+    * the app labels it on every screen it appears on.
+
+    The optional nutrients stay optional. A model that does not know the fibre
+    content should say so rather than produce a confident number, and `None`
+    still renders as an em dash exactly like a USDA gap.
+    """
+
+    name: str = Field(min_length=1, max_length=120)
+    kcal: float = Field(ge=0, le=900)
+    protein_g: float = Field(ge=0, le=100)
+    carbs_g: float = Field(ge=0, le=100)
+    fat_g: float = Field(ge=0, le=100)
+    fibre_g: float | None = Field(default=None, ge=0, le=100)
+    sugars_g: float | None = Field(default=None, ge=0, le=100)
+
+
+NUTRITION_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "foods": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "name": {"type": "STRING"},
+                    "kcal": {"type": "NUMBER"},
+                    "protein_g": {"type": "NUMBER"},
+                    "carbs_g": {"type": "NUMBER"},
+                    "fat_g": {"type": "NUMBER"},
+                    "fibre_g": {"type": "NUMBER"},
+                    "sugars_g": {"type": "NUMBER"},
+                },
+                "required": ["name", "kcal", "protein_g", "carbs_g", "fat_g"],
+            },
+        }
+    },
+    "required": ["foods"],
+}
+
+NUTRITION_PROMPT = """\
+Give typical nutrition values PER 100 GRAMS for each food named below.
+
+- Use well-established reference values for the plain, as-eaten form of the food.
+- kcal, protein_g, carbs_g and fat_g are required. Omit fibre_g or sugars_g
+  entirely if you are not reasonably confident — an omitted value is honest, a
+  guessed one is not.
+- Return one entry per food, with `name` copied exactly as given.
+- Sanity-check yourself: protein_g + carbs_g + fat_g cannot exceed 100, and
+  kcal should be close to 4*protein + 4*carbs + 9*fat.
+
+Foods:
+"""
 
 
 #: Gemini structured-output schema. Mirrors VisionItem — the model is
@@ -99,10 +179,11 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                 "type": "OBJECT",
                 "properties": {
                     "name": {"type": "STRING"},
+                    "search_term": {"type": "STRING"},
                     "quantity_grams": {"type": "NUMBER"},
                     "confidence": {"type": "NUMBER"},
                 },
-                "required": ["name", "quantity_grams", "confidence"],
+                "required": ["name", "search_term", "quantity_grams", "confidence"],
             },
         },
         "notes": {"type": "STRING"},
@@ -116,9 +197,13 @@ You are a nutrition assistant analysing a photo of food.
 Identify each distinct edible item visible and estimate its weight in grams as
 served. Rules:
 
-- Use plain, generic food names that would match a food database search:
-  "grilled chicken breast", "white rice cooked", "broccoli steamed" — never
-  brand names, never dish poetry.
+- `name` is what the user sees, so describe the dish as served: "grilled
+  chicken breast", "steamed broccoli". Never brand names, never dish poetry.
+- `search_term` is the same food reduced to the plainest words a food database
+  would file it under: drop cooking methods, adjectives and garnishes, keep the
+  food itself. "grilled chicken breast" -> "chicken breast". "creamy mashed
+  potatoes" -> "potato". "handful of cherry tomatoes" -> "tomato". Prefer one
+  or two words. This is a lookup key, not a description.
 - Estimate quantity_grams from visual cues (plate size, utensils, thickness).
   These are estimates the user will adjust; be realistic, not precise.
 - confidence is 0 to 1: how sure you are of BOTH the identification and the
@@ -130,12 +215,8 @@ served. Rules:
 """
 
 
-def parse_vision_response(payload: dict[str, Any]) -> VisionResult:
-    """Extract and validate the model's JSON from a generateContent response.
-
-    Malformed items are dropped individually rather than failing the scan: one
-    hallucinated 5 kg entry should not cost the user the four good ones.
-    """
+def _model_json(payload: dict[str, Any]) -> dict[str, Any]:
+    """Pull the model's JSON out of the generateContent envelope."""
     try:
         text = payload["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError, TypeError) as exc:
@@ -145,12 +226,41 @@ def parse_vision_response(payload: dict[str, Any]) -> VisionResult:
         reason = (payload.get("candidates") or [{}])[0].get("finishReason", "unknown")
         raise VisionUnavailable(f"Gemini returned no content (finishReason={reason})") from exc
 
-    import json
-
     try:
-        raw = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError as exc:
         raise VisionUnavailable("Gemini returned invalid JSON despite schema") from exc
+
+
+def _parse_nutrition(payload: dict[str, Any]) -> dict[str, EstimatedNutrition]:
+    """Validate estimated nutrition, dropping anything implausible.
+
+    The bounds on `EstimatedNutrition` do real work here. A model that returns
+    2400 kcal per 100 g has produced a number that would silently wreck a day's
+    diary, and the right response is to drop the food back to "no match" — the
+    user can still search for it manually — rather than store nonsense under a
+    label that says "estimated" as though that made it usable.
+    """
+    raw = _model_json(payload)
+
+    estimates: dict[str, EstimatedNutrition] = {}
+    for entry in (raw.get("foods") or [])[:MAX_ITEMS]:
+        try:
+            estimate = EstimatedNutrition.model_validate(entry)
+        except ValidationError:
+            logger.warning("Dropping implausible nutrition estimate: %r", entry)
+            continue
+        estimates[estimate.name.strip().lower()] = estimate
+    return estimates
+
+
+def parse_vision_response(payload: dict[str, Any]) -> VisionResult:
+    """Extract and validate the model's JSON from a generateContent response.
+
+    Malformed items are dropped individually rather than failing the scan: one
+    hallucinated 5 kg entry should not cost the user the four good ones.
+    """
+    raw = _model_json(payload)
 
     items: list[VisionItem] = []
     for entry in (raw.get("items") or [])[:MAX_ITEMS]:
@@ -202,14 +312,68 @@ class VisionClient:
         url = f"{BASE_URL}/models/{settings.gemini_model}:generateContent"
         client = self._client or httpx.AsyncClient(timeout=40.0)
         try:
-            return await self._post_with_retry(client, url, body, settings.gemini_api_key)
+            return await self._post_with_retry(
+                client, url, body, settings.gemini_api_key, parse=parse_vision_response
+            )
         finally:
             if self._client is None:
                 await client.aclose()
 
-    async def _post_with_retry(
-        self, client: httpx.AsyncClient, url: str, body: dict[str, Any], api_key: str
-    ) -> VisionResult:
+    async def estimate_nutrition(self, names: list[str]) -> dict[str, EstimatedNutrition]:
+        """Ask the model for per-100 g nutrition for foods no database matched.
+
+        A second call rather than extra fields on the first, and that separation
+        is the safeguard rather than an accident of design. The scan request has
+        no nutrition field in its schema at all, so the identification step
+        physically cannot return a calorie — which means this call is the only
+        path by which an estimated number can enter the system, and it is
+        reached only after USDA and the cache have both failed.
+
+        Returns a mapping keyed by the name asked for. Missing keys are normal:
+        anything the model declined or garbled is simply left unmatched, which
+        the app already knows how to show.
+        """
+        settings = get_settings()
+        if not settings.gemini_api_key:
+            raise VisionNotConfigured("GEMINI_API_KEY is not set")
+        if not names:
+            return {}
+
+        listing = "\n".join(f"- {name}" for name in names[:MAX_ITEMS])
+        body = {
+            "contents": [{"parts": [{"text": NUTRITION_PROMPT + listing}]}],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+                "response_schema": NUTRITION_SCHEMA,
+                # Lower than the vision call. This is recall of reference values,
+                # not interpretation of an image; variation is not a feature.
+                "temperature": 0.0,
+                "max_output_tokens": MAX_OUTPUT_TOKENS,
+                "thinkingConfig": {"thinkingBudget": THINKING_BUDGET_TOKENS},
+            },
+        }
+
+        url = f"{BASE_URL}/models/{settings.gemini_model}:generateContent"
+        client = self._client or httpx.AsyncClient(timeout=40.0)
+        try:
+            payload = await self._post_with_retry(
+                client, url, body, settings.gemini_api_key, parse=_parse_nutrition
+            )
+        finally:
+            if self._client is None:
+                await client.aclose()
+
+        return payload
+
+    async def _post_with_retry[T](
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        body: dict[str, Any],
+        api_key: str,
+        *,
+        parse: "Callable[[dict[str, Any]], T]",
+    ) -> T:
         """POST once, retrying only failures that a retry can plausibly fix.
 
         Deliberately narrow. A 429 is a spent quota and retrying makes it worse;
@@ -246,7 +410,7 @@ class VisionClient:
                             response.text[:300],
                         )
                         raise VisionUnavailable(f"Gemini returned {response.status_code}")
-                    return parse_vision_response(response.json())
+                    return parse(response.json())
 
                 last_error = VisionUnavailable(f"Gemini returned {response.status_code}")
                 logger.warning(

@@ -7,13 +7,18 @@
  */
 
 import type { ReactNode } from 'react';
-import { StyleSheet, View, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { cardShadow, color, radius, space } from '@/theme/tokens';
 
 interface CardProps {
   children: ReactNode;
-  style?: ViewStyle | ViewStyle[];
+  /**
+   * `StyleProp` rather than a bare `ViewStyle`, so callers can write the normal
+   * `[base, condition && variant]` form. The narrower type rejected `false`,
+   * which forced conditional styling into a ternary at every call site.
+   */
+  style?: StyleProp<ViewStyle>;
   /** Tighter padding for tiles that are mostly a single number. */
   compact?: boolean;
 }

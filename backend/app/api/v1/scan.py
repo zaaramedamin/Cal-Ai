@@ -22,12 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser
 from app.core.rate_limit import RateLimit
+from app.db.models.food import Food, FoodSource
 from app.db.session import get_session
 from app.schemas.food import FoodSearchResult
 from app.schemas.scan import ScannedItem, ScanRequest, ScanResponse
-from app.services.food_cache import search_foods
+from app.services.food_cache import search_foods, upsert_estimated_food
 from app.services.vision import (
     VisionClient,
+    VisionItem,
     VisionNotConfigured,
     VisionQuotaExhausted,
     VisionUnavailable,
@@ -115,27 +117,87 @@ async def scan_meal(
             detail="Could not analyse the photo right now. Try again in a moment.",
         ) from exc
 
-    items: list[ScannedItem] = []
-    unmatched = 0
-
     # Sequential, not gathered. One AsyncSession is not safe for concurrent use,
     # and a fan-out of eight simultaneous USDA calls would spike a shared budget
     # we are trying to spend carefully. Eight cache lookups are fast anyway.
-    for detected in result.items:
-        foods, _ = await search_foods(session, detected.name, limit=MATCH_CANDIDATES)
-        best = foods[0] if foods else None
-        if best is None:
-            unmatched += 1
+    matches: dict[int, Food | None] = {}
+    for index, detected in enumerate(result.items):
+        # `query` is the model's stripped-down search term ("chicken breast"),
+        # not the descriptive name it shows the user ("grilled chicken breast").
+        # Food databases file things formally and the descriptive form rarely
+        # matches; the bare noun usually does.
+        foods, _ = await search_foods(session, detected.query, limit=MATCH_CANDIDATES)
+        matches[index] = foods[0] if foods else None
 
-        items.append(
-            ScannedItem(
-                detected_name=detected.name,
-                estimated_grams=detected.quantity_grams,
-                confidence=detected.confidence,
-                match=FoodSearchResult.model_validate(best) if best else None,
-            )
+    # Everything above is measured data. Below this line is the one exception,
+    # and it only runs for foods the databases genuinely could not identify.
+    missing = [index for index, food in matches.items() if food is None]
+    if missing:
+        matches |= await _estimate_missing(session, vision, result.items, missing)
+
+    items = [
+        ScannedItem(
+            detected_name=detected.name,
+            estimated_grams=detected.quantity_grams,
+            confidence=detected.confidence,
+            match=(
+                FoodSearchResult.model_validate(matches[index]) if matches[index] else None
+            ),
         )
+        for index, detected in enumerate(result.items)
+    ]
 
-    logger.info("Scan for user %s: %d detected, %d unmatched", user.id, len(items), unmatched)
+    unmatched = sum(1 for item in items if item.match is None)
+    estimated = sum(
+        1 for item in items if item.match and item.match.source == FoodSource.AI_ESTIMATE
+    )
+    logger.info(
+        "Scan for user %s: %d detected, %d AI-estimated, %d unmatched",
+        user.id,
+        len(items),
+        estimated,
+        unmatched,
+    )
 
-    return ScanResponse(items=items, notes=result.notes, unmatched_count=unmatched)
+    return ScanResponse(
+        items=items,
+        notes=result.notes,
+        unmatched_count=unmatched,
+        estimated_count=estimated,
+    )
+
+
+async def _estimate_missing(
+    session: AsyncSession,
+    vision: VisionClient,
+    detected: list[VisionItem],
+    missing: list[int],
+) -> dict[int, Food | None]:
+    """Last resort for foods no database could match.
+
+    Asks the model for per-100 g nutrition and stores it under
+    `FoodSource.AI_ESTIMATE` — the only rows in this database whose numbers were
+    not measured. They are excluded from food search, so they surface nowhere
+    except the scan that produced them, and the app labels them wherever they
+    appear.
+
+    A failure here is not an error. The items simply stay unmatched, which is
+    the state the app already handles by offering a manual search.
+    """
+    names = [detected[index].name for index in missing]
+    try:
+        estimates = await vision.estimate_nutrition(names)
+    except (VisionUnavailable, VisionQuotaExhausted, VisionNotConfigured) as exc:
+        logger.info("Nutrition estimation unavailable, leaving %d unmatched: %s", len(names), exc)
+        return {}
+
+    resolved: dict[int, Food | None] = {}
+    for index in missing:
+        estimate = estimates.get(detected[index].name.strip().lower())
+        if estimate is None:
+            continue
+        resolved[index] = await upsert_estimated_food(session, estimate)
+
+    if resolved:
+        await session.commit()
+    return resolved

@@ -16,6 +16,7 @@ from app.api.v1.scan import get_vision_client
 from app.db.models.food import Food
 from app.main import app
 from app.services.vision import (
+    EstimatedNutrition,
     VisionItem,
     VisionNotConfigured,
     VisionQuotaExhausted,
@@ -36,12 +37,28 @@ def authed(client: TestClient, email: str = "scan@example.com") -> dict[str, str
 
 
 class FakeVision:
-    """Stands in for Gemini. Returns a canned result or raises."""
+    """Stands in for Gemini. Returns canned results or raises.
 
-    def __init__(self, result: VisionResult | None = None, error: Exception | None = None) -> None:
+    `estimates` defaults to empty, which is the important default: unless a test
+    explicitly opts in, the AI nutrition fallback produces nothing and unmatched
+    foods stay unmatched. A test that wants estimates has to ask for them, so it
+    is always obvious from the test body which path is under examination.
+    """
+
+    def __init__(
+        self,
+        result: VisionResult | None = None,
+        error: Exception | None = None,
+        estimates: dict[str, EstimatedNutrition] | None = None,
+        estimate_error: Exception | None = None,
+    ) -> None:
         self._result = result
         self._error = error
+        self._estimates = estimates or {}
+        self._estimate_error = estimate_error
         self.calls = 0
+        self.estimate_calls = 0
+        self.estimated_names: list[str] = []
 
     async def analyse_meal(self, image_base64: str, media_type: str) -> VisionResult:
         self.calls += 1
@@ -49,6 +66,13 @@ class FakeVision:
             raise self._error
         assert self._result is not None
         return self._result
+
+    async def estimate_nutrition(self, names: list[str]) -> dict[str, EstimatedNutrition]:
+        self.estimate_calls += 1
+        self.estimated_names = list(names)
+        if self._estimate_error:
+            raise self._estimate_error
+        return self._estimates
 
 
 @pytest.fixture
@@ -120,20 +144,30 @@ async def test_detected_foods_are_matched_to_real_database_rows(
     assert body["unmatched_count"] == 0
 
 
-async def test_unmatched_items_carry_no_nutrition(
-    client: TestClient, session: AsyncSession, use_vision, monkeypatch
-) -> None:
-    """A food we cannot match is reported honestly, never invented.
+@pytest.fixture
+def no_usda(monkeypatch) -> None:
+    """Make upstream misses deterministic.
 
-    USDA is stubbed out so the miss is deterministic — otherwise this test would
-    depend on what a live search returns for a nonsense word.
+    Without this a test asserting "nothing matched" would depend on what a live
+    USDA search happens to return for a nonsense word.
     """
 
     async def no_upstream(*args, **kwargs):
         return []
 
     monkeypatch.setattr("app.services.food_cache.UsdaClient.search", no_upstream)
-    use_vision(
+
+
+async def test_unmatched_items_carry_no_nutrition(
+    client: TestClient, session: AsyncSession, use_vision, no_usda
+) -> None:
+    """A food we cannot match and cannot estimate carries no numbers at all.
+
+    This is the floor the whole design rests on: the app would rather show
+    nothing and offer a manual search than display a value it cannot stand
+    behind.
+    """
+    fake = use_vision(
         FakeVision(
             VisionResult(items=[VisionItem(name="zzzznotafood", quantity_grams=90, confidence=0.3)])
         )
@@ -145,6 +179,118 @@ async def test_unmatched_items_carry_no_nutrition(
     body = response.json()
     assert body["items"][0]["match"] is None
     assert body["unmatched_count"] == 1
+    assert body["estimated_count"] == 0
+    # The fallback was attempted — it simply had nothing to offer.
+    assert fake.estimate_calls == 1
+
+
+async def test_ai_estimate_fills_a_gap_and_is_labelled_as_one(
+    client: TestClient, session: AsyncSession, use_vision, no_usda
+) -> None:
+    """The user's chosen fallback, with the label that keeps it honest.
+
+    The numbers reaching the app must carry `source: ai_estimate`, because that
+    field is the only thing telling the client to render a warning rather than
+    presenting a guess with the same authority as a USDA measurement.
+    """
+    use_vision(
+        FakeVision(
+            VisionResult(items=[VisionItem(name="shakshuka", quantity_grams=250, confidence=0.7)]),
+            estimates={
+                "shakshuka": EstimatedNutrition(
+                    name="shakshuka", kcal=95, protein_g=5, carbs_g=6, fat_g=6, fibre_g=1.5
+                )
+            },
+        )
+    )
+
+    response = client.post("/api/v1/scan", json={"image_base64": IMAGE}, headers=authed(client))
+
+    assert response.status_code == 200
+    body = response.json()
+    match = body["items"][0]["match"]
+    assert match["source"] == "ai_estimate"
+    assert match["kcal"] == 95
+    assert body["estimated_count"] == 1
+    assert body["unmatched_count"] == 0
+
+
+async def test_estimates_are_asked_for_only_after_the_databases_fail(
+    client: TestClient, session: AsyncSession, use_vision
+) -> None:
+    """The guarantee that makes the fallback acceptable.
+
+    A food the database knows must never be answered with a guess, so a scan
+    where everything matches must not reach the estimator at all.
+    """
+    await seed_food(session, "Chicken breast, grilled")
+    fake = use_vision(
+        FakeVision(
+            VisionResult(
+                items=[
+                    VisionItem(
+                        name="grilled chicken breast",
+                        search_term="chicken breast",
+                        quantity_grams=150,
+                        confidence=0.9,
+                    )
+                ]
+            )
+        )
+    )
+
+    response = client.post("/api/v1/scan", json={"image_base64": IMAGE}, headers=authed(client))
+
+    assert response.json()["items"][0]["match"]["source"] == "usda"
+    assert fake.estimate_calls == 0
+
+
+async def test_estimated_foods_never_appear_in_food_search(
+    client: TestClient, session: AsyncSession, use_vision, no_usda
+) -> None:
+    """The quarantine, verified end to end.
+
+    An AI estimate is created here by a scan, then searched for through the
+    ordinary food search. It must not come back: someone browsing for a food has
+    not watched anything being estimated and would read the numbers as measured.
+    """
+    use_vision(
+        FakeVision(
+            VisionResult(items=[VisionItem(name="shakshuka", quantity_grams=250, confidence=0.7)]),
+            estimates={
+                "shakshuka": EstimatedNutrition(
+                    name="shakshuka", kcal=95, protein_g=5, carbs_g=6, fat_g=6
+                )
+            },
+        )
+    )
+    headers = authed(client)
+
+    scan = client.post("/api/v1/scan", json={"image_base64": IMAGE}, headers=headers)
+    assert scan.json()["items"][0]["match"]["source"] == "ai_estimate"
+
+    found = client.get("/api/v1/foods/search?q=shakshuka", headers=headers)
+
+    assert found.status_code == 200
+    assert found.json()["results"] == []
+
+
+async def test_a_failing_estimator_leaves_the_item_unmatched(
+    client: TestClient, session: AsyncSession, use_vision, no_usda
+) -> None:
+    """A dead estimator degrades to "no match", never to a broken scan."""
+    use_vision(
+        FakeVision(
+            VisionResult(items=[VisionItem(name="shakshuka", quantity_grams=250, confidence=0.7)]),
+            estimate_error=VisionUnavailable("upstream down"),
+        )
+    )
+
+    response = client.post("/api/v1/scan", json={"image_base64": IMAGE}, headers=authed(client))
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["match"] is None
+    assert response.json()["unmatched_count"] == 1
 
 
 async def test_no_food_in_photo_returns_an_empty_list(client: TestClient, use_vision) -> None:

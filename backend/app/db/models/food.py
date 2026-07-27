@@ -22,6 +22,15 @@ class FoodSource(enum.StrEnum):
     OFF = "off"
     #: Created by a user. Still never invented by us — the user asserts it.
     USER = "user"
+    #: The one source whose numbers are not measured.
+    #:
+    #: Written only when a photo scan identifies a food that neither USDA nor the
+    #: cache can match, and only ever surfaced with a visible warning. It is
+    #: excluded from ordinary food search, so a row like this can never reach a
+    #: user who did not watch it being estimated. Everything else in this table
+    #: is traceable to a measurement; this is traceable to a guess, and the app
+    #: has to keep saying so.
+    AI_ESTIMATE = "ai_estimate"
 
 
 class Food(UUIDPrimaryKey, TimestampedCreation, Base):
@@ -48,7 +57,7 @@ class Food(UUIDPrimaryKey, TimestampedCreation, Base):
     # cache rather than a pile of duplicates: re-importing updates in place.
     __table_args__ = (UniqueConstraint("source", "source_id", name="uq_food_source_id"),)
 
-    source: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     source_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)

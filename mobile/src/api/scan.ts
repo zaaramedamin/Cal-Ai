@@ -20,7 +20,12 @@ export interface ScannedItem {
   estimated_grams: number;
   /** The model's own certainty, 0–1. A hint for the user, never a gate. */
   confidence: number;
-  /** null when nothing matched — the app offers a manual search instead. */
+  /**
+   * null when nothing matched and nothing could be estimated.
+   *
+   * When `match.source` is `ai_estimate` the numbers came from the model rather
+   * than a measurement. Check it before rendering — see `isEstimate` below.
+   */
   match: FoodSearchResult | null;
 }
 
@@ -29,6 +34,19 @@ export interface ScanResponse {
   /** The model's caveats: "sauce not visible", "no food in this photo". */
   notes: string;
   unmatched_count: number;
+  /** How many items carry AI-estimated numbers rather than database ones. */
+  estimated_count: number;
+}
+
+/**
+ * Whether a match's numbers were estimated rather than measured.
+ *
+ * A named predicate rather than an inline string comparison scattered across
+ * screens: every place that shows these numbers has to show the warning too,
+ * and one function is something you can search for to check that.
+ */
+export function isEstimate(match: FoodSearchResult | null): boolean {
+  return match?.source === 'ai_estimate';
 }
 
 /**

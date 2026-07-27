@@ -36,7 +36,7 @@ import {
   type MealSlot,
   logFood,
 } from '@/api/diary';
-import { type ScannedItem, scanMeal } from '@/api/scan';
+import { type ScannedItem, isEstimate, scanMeal } from '@/api/scan';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { Screen } from '@/components/screen';
@@ -74,7 +74,13 @@ type State =
   | { kind: 'idle' }
   | { kind: 'preparing' }
   | { kind: 'analyzing'; preview: string }
-  | { kind: 'review'; preview: string; items: ReviewItem[]; notes: string }
+  | {
+      kind: 'review';
+      preview: string;
+      items: ReviewItem[];
+      notes: string;
+      estimatedCount: number;
+    }
   | { kind: 'nothing'; preview: string; notes: string }
   | { kind: 'error'; title: string; message: string };
 
@@ -179,6 +185,7 @@ export default function ScanScreen() {
         preview: original,
         items: toReviewItems(response.items),
         notes: response.notes,
+        estimatedCount: response.estimated_count,
       });
     } catch (caught) {
       setState({ kind: 'error', ...describeScanFailure(caught) });
@@ -416,6 +423,21 @@ function Review({
           </Text>
         </View>
 
+        {state.estimatedCount > 0 && (
+          // A second, stronger warning, because these items break the promise
+          // the line above makes. Saying "nutrition comes from USDA" and then
+          // silently including numbers that do not would be the dishonest way
+          // to ship this feature.
+          <View style={styles.estimateNotice}>
+            <Ionicons name="sparkles-outline" size={16} color={color.carbs} />
+            <Text style={styles.estimateNoticeText}>
+              {state.estimatedCount === 1 ? '1 food is' : `${state.estimatedCount} foods are`} not
+              in the USDA database, so the numbers below are the AI&apos;s own estimate. Treat
+              them as approximate.
+            </Text>
+          </View>
+        )}
+
         {state.notes.length > 0 && <Text style={styles.notes}>{state.notes}</Text>}
 
         <Text style={[text.overline, styles.sectionLabel]}>Meal</Text>
@@ -497,9 +519,10 @@ function ReviewCard({
   const grams = gramsOf(item);
   const validGrams = grams > 0;
   const kcal = item.match ? (item.match.kcal * grams) / 100 : null;
+  const estimated = isEstimate(item.match);
 
   return (
-    <Card style={styles.itemCard}>
+    <Card style={[styles.itemCard, estimated && styles.itemCardEstimated]}>
       <View style={styles.itemTop}>
         <Pressable
           onPress={() => item.match && onUpdate({ selected: !item.selected })}
@@ -530,6 +553,15 @@ function ReviewCard({
             </Text>
           ) : (
             <Text style={styles.itemNoMatch}>No match in the food database</Text>
+          )}
+          {estimated && (
+            // Deliberately loud, and deliberately attached to the item rather
+            // than only summarised at the top. A user scrolling a list of five
+            // foods should not have to remember which of them were guessed.
+            <View style={styles.estimateBadge}>
+              <Ionicons name="sparkles-outline" size={12} color={color.carbs} />
+              <Text style={styles.estimateBadgeText}>AI estimate — not from USDA</Text>
+            </View>
           )}
           {item.confidence < LOW_CONFIDENCE && (
             <View style={styles.lowConfidence}>
@@ -677,6 +709,19 @@ const styles = StyleSheet.create({
   honestyText: { ...text.bodyMuted, fontSize: 12, flex: 1, lineHeight: 17 },
   notes: { ...text.bodyMuted, fontSize: 12, fontStyle: 'italic' },
 
+  estimateNotice: {
+    flexDirection: 'row',
+    gap: space.sm,
+    padding: space.md,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(239, 160, 54, 0.10)',
+    borderLeftWidth: 3,
+    borderLeftColor: color.carbs,
+  },
+  estimateNoticeText: { ...text.body, fontSize: 12, flex: 1, lineHeight: 17 },
+  estimateBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  estimateBadgeText: { ...text.label, fontSize: 11, color: color.carbs },
+
   sectionLabel: { marginTop: space.sm },
   slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   slotChip: {
@@ -693,6 +738,9 @@ const styles = StyleSheet.create({
   slotChipLabelSelected: { color: color.onDark },
 
   itemCard: { gap: space.md },
+  // A left edge in the carbs amber, matching the badge and the banner, so an
+  // estimated row is identifiable at a glance while scrolling.
+  itemCardEstimated: { borderLeftWidth: 3, borderLeftColor: color.carbs },
   itemTop: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md },
   checkbox: {
     width: 24,

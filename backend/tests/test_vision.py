@@ -20,6 +20,7 @@ from app.services.vision import (
     VisionClient,
     VisionQuotaExhausted,
     VisionUnavailable,
+    _parse_nutrition,
     parse_vision_response,
 )
 
@@ -175,6 +176,77 @@ def test_thinking_exhausting_the_budget_is_reported_not_swallowed() -> None:
 # --------------------------------------------------------------------------- #
 # Transport: retries, and what must never be retried.
 # --------------------------------------------------------------------------- #
+
+
+def test_parses_nutrition_out_of_the_real_envelope() -> None:
+    """Regression: the parser must unwrap the response, not read it raw.
+
+    The first version of `_parse_nutrition` looked for "foods" at the top level
+    of the generateContent response, where it never appears — it lives inside
+    candidates[0].content.parts[0].text as a JSON string. It silently returned
+    zero estimates for a perfectly good reply. Building this test from the real
+    envelope, rather than from the shape the function expected, is the only
+    reason it fails when that mistake comes back.
+    """
+    estimates = _parse_nutrition(
+        gemini_response(
+            {
+                "foods": [
+                    {
+                        "name": "Shakshuka",
+                        "kcal": 102,
+                        "protein_g": 4.5,
+                        "carbs_g": 5.0,
+                        "fat_g": 7.0,
+                        "fibre_g": 1.2,
+                    }
+                ]
+            }
+        )
+    )
+
+    # Keyed lowercase, so lookup does not depend on the model's capitalisation.
+    assert estimates["shakshuka"].kcal == 102
+    assert estimates["shakshuka"].fibre_g == 1.2
+
+
+def test_drops_nutritionally_impossible_estimates() -> None:
+    """Bounds do real work: a wrong number here would wreck a day's diary.
+
+    Dropping the entry sends the food back to "no match", where the user can
+    search manually — better than storing nonsense under a label that says
+    "estimated" as though that made it usable.
+    """
+    estimates = _parse_nutrition(
+        gemini_response(
+            {
+                "foods": [
+                    {"name": "impossible", "kcal": 5000, "protein_g": 3, "carbs_g": 3, "fat_g": 3},
+                    {"name": "negative", "kcal": -10, "protein_g": 3, "carbs_g": 3, "fat_g": 3},
+                    {"name": "over unity", "kcal": 300, "protein_g": 900, "carbs_g": 3, "fat_g": 3},
+                    {"name": "fine", "kcal": 89, "protein_g": 1.1, "carbs_g": 22.8, "fat_g": 0.3},
+                ]
+            }
+        )
+    )
+
+    assert list(estimates) == ["fine"]
+
+
+def test_missing_optional_nutrients_stay_none() -> None:
+    """An omitted fibre value must not become 0.
+
+    Same rule as a USDA gap: "not reported" and "none present" are different
+    claims, and the app renders the first as an em dash.
+    """
+    estimates = _parse_nutrition(
+        gemini_response(
+            {"foods": [{"name": "x", "kcal": 89, "protein_g": 1, "carbs_g": 22, "fat_g": 0.3}]}
+        )
+    )
+
+    assert estimates["x"].fibre_g is None
+    assert estimates["x"].sugars_g is None
 
 
 class Upstream:
