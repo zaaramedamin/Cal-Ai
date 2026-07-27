@@ -105,6 +105,29 @@ QR code.
 
 ---
 
+### If PowerShell refuses to run scripts
+
+Windows blocks script execution by default, so `Activate.ps1` and `npx` both fail with
+*"running scripts is disabled on this system"*. Fix it once — no admin rights needed, since
+`-Scope CurrentUser` only touches your own account:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+`RemoteSigned` still blocks unsigned scripts downloaded from the internet; it only trusts local
+ones. It is the usual setting on a Windows development machine.
+
+If you would rather change nothing, both tools have a form that sidesteps PowerShell entirely —
+`npx.cmd expo start` runs as a batch file, and calling the interpreter directly does exactly what
+activation does, since activating a virtualenv only prepends `.venv\Scripts` to `PATH`:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+---
+
 ## The two things that will break on Windows
 
 Both of these produce a "cannot reach the backend" error with no obvious cause. The app's error
