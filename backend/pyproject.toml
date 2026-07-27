@@ -29,6 +29,11 @@ dependencies = [
     "pyjwt>=2.10",
     # Backs Pydantic's EmailStr. Validates syntax and normalises the domain.
     "email-validator>=2.2",
+    # --- Phase 2: local-day resolution ---
+    # Windows ships no system timezone database, so zoneinfo has nothing to read
+    # and every lookup silently falls back to UTC. That would put late-evening
+    # diary entries on the wrong day, on the platform this is developed on.
+    "tzdata>=2025.1",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +43,7 @@ dev = [
     # Starlette's TestClient transport. httpx2, not httpx: Starlette deprecated
     # the httpx 1.x integration and warns on every test run otherwise.
     "httpx2>=2.9",
+    "pytest-cov>=6.0",
     "ruff>=0.9",
 ]
 
