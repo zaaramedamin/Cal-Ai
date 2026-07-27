@@ -147,6 +147,24 @@ Related: `localhost` typed on a phone means *the phone*, which is running no ser
 hardcodes an address — it reads the host Expo served the bundle from and targets port 8000 on the
 same machine, so it keeps working when your router hands out a different IP.
 
+### Use `127.0.0.1`, never `localhost`, in `DATABASE_URL`
+
+`localhost` resolves to the IPv6 address `::1` before IPv4, but Docker Compose
+publishes Postgres on IPv4 only. Every new connection therefore waits for the IPv6
+attempt to fail before retrying — and nothing reports an error, so it just looks like
+a slow database.
+
+Measured on this project:
+
+| Host | Time per connection |
+|---|---|
+| `localhost` | 2123 ms |
+| `127.0.0.1` | 84 ms |
+
+It took the backend test suite from **4m 48s to 21s**. Connection pooling hides it in
+normal development, which is exactly why it survives unnoticed until something opens
+connections in a loop.
+
 ### Windows Firewall blocks inbound 8000
 
 Run once, in an **elevated** PowerShell:
@@ -223,6 +241,20 @@ If step 2 and 3 look identical, the error handling is not actually doing its job
   Think invoice line item, not live price lookup.
 - **"Today" is the user's local day, never UTC.** `diary_entries.local_date` is computed server-side
   from the profile's IANA timezone. The client never dictates the date.
+- **Passwords use argon2id; refresh tokens use SHA-256.** Different hashes for different inputs.
+  A password is low-entropy and reused across sites, so it needs a deliberately slow, memory-hard
+  hash. A refresh token is 256 bits we generated ourselves — nobody guesses it, so a slow hash
+  would only add latency to every refresh.
+- **Refresh tokens are opaque, not JWTs.** A JWT validates itself, which is exactly wrong here:
+  every refresh must hit the database so revocation takes effect immediately. That is what makes
+  logout mean something.
+- **Rotation with theft detection, but only where theft is actually implied.** Replaying a *spent*
+  token means two parties hold it, so every session is revoked. Replaying a *logged-out* token is
+  almost always a stale client, and treating that as theft would make signing out on one device
+  silently sign you out everywhere.
+- **Tokens live in `expo-secure-store`, never AsyncStorage.** AsyncStorage is a plaintext file;
+  SecureStore uses the iOS Keychain and Android's hardware-backed Keystore, so the OS holds the
+  encryption key and the app never sees it.
 
 ---
 
@@ -231,7 +263,7 @@ If step 2 and 3 look identical, the error handling is not actually doing its job
 | Phase | Delivers | Status |
 |---|---|---|
 | 0 | Monorepo, Postgres, health endpoint, Expo app proving the pipe | ✅ |
-| 1 | Auth: register/login/refresh/logout, argon2id, JWT, secure token storage | |
+| 1 | Auth: register/login/refresh/logout, argon2id, JWT, secure token storage | ✅ |
 | 2 | Onboarding, BMR/TDEE/macro targets with full unit tests, results screen | |
 | 3 | USDA integration, normalization, caching, search | |
 | 4 | Diary: log to meal slots, daily summary, macro bar | |
