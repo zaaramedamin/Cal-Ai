@@ -39,6 +39,7 @@ from app.core.config import get_settings
 from app.core.rate_limit import reset_all
 from app.db.mongo import FOOD_ITEMS, MEALS, close_client
 from app.schemas.catalogue import CatalogueFood, Portion, UnitKind
+from app.services.catalogue_photos import PHOTOS
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 TEST_DB_NAME = "calai_test"
@@ -180,7 +181,7 @@ async def _clean_mongo(mongo) -> AsyncGenerator[None]:
     client bound to a loop that has since closed.
     """
     yield
-    for name in (FOOD_ITEMS, MEALS):
+    for name in (FOOD_ITEMS, MEALS, PHOTOS):
         await mongo[name].delete_many({})
     await close_client()
 

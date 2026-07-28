@@ -43,6 +43,12 @@ dependencies = [
     # maintain over pymongo, so it shares pymongo's BSON codecs and connection
     # pooling rather than reimplementing them.
     "motor>=3.6",
+    # Resizes catalogue photos at import time. Worth a dependency: measured on a
+    # 4032x3024 phone photo, 6.6 MB becomes 85 KB at 512px — so the full
+    # thirty-five-food catalogue is about 3 MB of images instead of 230 MB, for
+    # tiles rendered 110pt wide. Decoding and re-encoding also means the bytes
+    # served back are ones we generated rather than a file someone handed us.
+    "pillow>=11.0",
     # Not a transitive-only dependency: we import ObjectId, IndexModel and the
     # error types directly, and pinning it explicitly means a motor upgrade
     # cannot silently move the version those come from.

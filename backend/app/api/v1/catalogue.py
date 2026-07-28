@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from app.services.catalogue import (
     materialise,
     nutrients_for,
 )
+from app.services.catalogue_photos import get_photo
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,37 @@ async def browse(user: CurrentUser) -> CatalogueResponse:
     sections = await list_catalogue()
     return CatalogueResponse(
         sections=sections, total=sum(len(section.foods) for section in sections)
+    )
+
+
+@router.get(
+    "/photos/{name}",
+    summary="A catalogue food's photo",
+    response_class=Response,
+    responses={200: {"content": {"image/jpeg": {}}}},
+)
+async def read_photo(
+    name: Annotated[str, Path(pattern=r"^[a-z0-9][a-z0-9-]{0,63}-[0-9a-f]{8}\.jpg$")],
+) -> Response:
+    """Serve a stored thumbnail.
+
+    **Unauthenticated, deliberately.** `<Image>` in React Native does not carry
+    our auth header, so an authenticated image URL would need either a signed
+    token per photo or a custom image component — real complexity to protect a
+    picture of a banana that is identical for every user.
+
+    Cached for a year because the URL is immutable: the filename embeds a hash of
+    the bytes, so a new photo is a new URL and a stale cache is impossible. That
+    is the whole reason for hashing the name rather than serving `/photos/egg`.
+    """
+    photo = await get_photo(name)
+    if photo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such photo.")
+
+    return Response(
+        content=photo["data"],
+        media_type=photo.get("content_type", "image/jpeg"),
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 
