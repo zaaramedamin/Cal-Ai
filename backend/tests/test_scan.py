@@ -106,10 +106,32 @@ async def seed_food(session: AsyncSession, name: str, **overrides) -> Food:
     return food
 
 
+@pytest.fixture
+def no_usda(monkeypatch) -> None:
+    """Make upstream misses deterministic.
+
+    Without this a test asserting "nothing matched" would depend on what a live
+    USDA search happens to return for a nonsense word.
+    """
+
+    async def no_upstream(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("app.services.food_cache.UsdaClient.search", no_upstream)
+
+
 async def test_detected_foods_are_matched_to_real_database_rows(
-    client: TestClient, session: AsyncSession, use_vision
+    client: TestClient, session: AsyncSession, use_vision, no_usda
 ) -> None:
-    """The core claim: nutrition comes from the cache, not from the model."""
+    """The core claim: nutrition comes from the cache, not from the model.
+
+    `no_usda` is load-bearing, not incidental. search_foods now returns USDA's
+    own relevance order ahead of local hits, so without the stub this test
+    asserts against whatever live USDA ranks first for "chicken breast" — and
+    it passed for a while only because the shared DEMO_KEY was rate-limited,
+    which silently forced the local-only path. A test whose result depends on
+    someone else's API and our remaining quota is not a test.
+    """
     await seed_food(session, "Chicken breast, grilled", kcal=165, protein_g=31)
     use_vision(
         FakeVision(
@@ -142,20 +164,6 @@ async def test_detected_foods_are_matched_to_real_database_rows(
     assert item["match"]["protein_g"] == 31
     assert body["notes"] == "Looks grilled."
     assert body["unmatched_count"] == 0
-
-
-@pytest.fixture
-def no_usda(monkeypatch) -> None:
-    """Make upstream misses deterministic.
-
-    Without this a test asserting "nothing matched" would depend on what a live
-    USDA search happens to return for a nonsense word.
-    """
-
-    async def no_upstream(*args, **kwargs):
-        return []
-
-    monkeypatch.setattr("app.services.food_cache.UsdaClient.search", no_upstream)
 
 
 async def test_unmatched_items_carry_no_nutrition(
