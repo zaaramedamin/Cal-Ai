@@ -1,5 +1,5 @@
 /**
- * The macro bar — CalAi's signature element.
+ * The macro bar — Cal Ai's signature element.
  *
  * A single horizontal meter split into protein, carbohydrate and fat as
  * proportions of the calories they contribute. It renders at three scales from

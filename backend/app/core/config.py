@@ -90,14 +90,19 @@ class Settings(BaseSettings):
     # rest of the app works fine without it. Free key: aistudio.google.com/apikey
     gemini_api_key: str = ""
 
-    # An alias, not a pinned version, and deliberately so. Google retires pinned
-    # models *for new API keys* while leaving them listed and callable by older
-    # ones — so `gemini-2.5-flash` worked for months and then 404'd for a key
-    # issued today, with the misleading message that the model does not exist.
-    # The alias tracks whatever the current flash model is and cannot rot that
-    # way. The cost is that the model can change under us; pin a version here if
-    # a future release ever regresses food recognition.
-    gemini_model: str = "gemini-flash-latest"
+    # Flash-*lite*, and the "lite" is the whole point on a free tier.
+    #
+    # An alias rather than a pinned version, because Google retires pinned models
+    # for new API keys while leaving them listed — `gemini-2.5-flash` worked for
+    # months and then 404'd for a key issued today. But the alias has its own
+    # trap: `gemini-flash-latest` now resolves to gemini-3.6-flash, whose free
+    # tier is **20 requests per day**. That is not a scanning feature, it is a
+    # demo. Flash-lite carries a far larger free allowance and identifies food
+    # from a photo perfectly well — this is recognition, not reasoning.
+    #
+    # Set GEMINI_MODEL to `gemini-flash-latest` for the stronger model if you
+    # ever move to a paid key, where the daily cap stops mattering.
+    gemini_model: str = "gemini-flash-lite-latest"
 
     @field_validator("secret_key")
     @classmethod

@@ -21,6 +21,7 @@ Photos are analyzed and discarded — nothing is persisted server-side.
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -63,7 +64,67 @@ class VisionUnavailable(RuntimeError):
 
 
 class VisionQuotaExhausted(RuntimeError):
-    """The free-tier quota is spent; try again later."""
+    """The free-tier quota is spent.
+
+    Carries what Google actually said rather than a guess. The first version of
+    this hardcoded a one-hour wait for every 429, which produced the worst
+    possible message: a user who had scanned nothing was told the daily
+    allowance was gone and to come back in an hour, when the real answer was
+    "about 40 seconds". Being wrong in that direction is worse than saying
+    nothing — it teaches people the feature is broken.
+    """
+
+    def __init__(
+        self, message: str, *, retry_after_seconds: int, daily_limit: int | None = None
+    ) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        #: The free-tier cap, when Google names one. Lets the app say "20 scans a
+        #: day" instead of the vague "allowance", which sounds like a punishment.
+        self.daily_limit = daily_limit
+
+
+#: Fallback wait when Google's 429 carries no RetryInfo. A minute, not an hour:
+#: a short wrong guess costs one retry, a long one costs the user the feature.
+DEFAULT_QUOTA_RETRY_SECONDS = 60
+
+_RETRY_DELAY = re.compile(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"')
+
+
+def _quota_error(payload: dict[str, Any], raw: str) -> VisionQuotaExhausted:
+    """Turn Google's 429 into something the app can tell the user honestly.
+
+    Google puts the wait in a `RetryInfo` detail and the cap in a `QuotaFailure`
+    violation. Both are worth extracting: the wait makes the message actionable,
+    and the cap makes it explicable.
+    """
+    error = payload.get("error", {}) if isinstance(payload, dict) else {}
+    retry_after = DEFAULT_QUOTA_RETRY_SECONDS
+    daily_limit: int | None = None
+
+    for detail in error.get("details", []):
+        if str(detail.get("@type", "")).endswith("RetryInfo"):
+            match = re.fullmatch(r"(\d+(?:\.\d+)?)s", str(detail.get("retryDelay", "")))
+            if match:
+                # Rounded up: telling someone to retry at the exact boundary
+                # just earns them a second 429.
+                retry_after = int(float(match.group(1))) + 1
+        for violation in detail.get("violations", []):
+            value = violation.get("quotaValue")
+            if value is not None and str(value).isdigit():
+                daily_limit = int(value)
+
+    if retry_after == DEFAULT_QUOTA_RETRY_SECONDS:
+        # Some responses carry the delay only in the prose message.
+        fallback = _RETRY_DELAY.search(raw)
+        if fallback:
+            retry_after = int(float(fallback.group(1))) + 1
+
+    return VisionQuotaExhausted(
+        error.get("message", "Gemini quota exhausted"),
+        retry_after_seconds=retry_after,
+        daily_limit=daily_limit,
+    )
 
 
 class VisionNotConfigured(RuntimeError):
@@ -396,8 +457,13 @@ class VisionClient:
                 logger.warning("Gemini request failed (attempt %d): %s", attempt, exc)
             else:
                 if response.status_code == 429:
-                    # The shared free-tier budget for the day/minute is spent.
-                    raise VisionQuotaExhausted("Gemini free-tier quota exhausted")
+                    # The shared free-tier budget is spent. Parse Google's own
+                    # RetryInfo rather than guessing — see _quota_error.
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = {}
+                    raise _quota_error(payload, response.text)
 
                 if response.status_code not in RETRYABLE_STATUS:
                     if not response.is_success:

@@ -52,6 +52,30 @@ scan_rate_limit = RateLimit(times=20, seconds=3600, scope="scan")
 MATCH_CANDIDATES = 5
 
 
+def _quota_message(exc: VisionQuotaExhausted) -> str:
+    """Say what actually happened and what to do about it.
+
+    Three facts make this message useful where the old one was not: how long to
+    wait, that the wait is short, and — when Google tells us — what the cap
+    actually is. "Scanning limit reached" with no numbers reads as a punishment
+    for something the user did; naming a shared free-tier cap reads as a fact
+    about the deployment, which is what it is.
+    """
+    wait = exc.retry_after_seconds
+    when = f"{wait} seconds" if wait < 90 else f"{max(1, round(wait / 60))} minutes"
+
+    if exc.daily_limit is not None:
+        return (
+            f"This server's free AI allowance is {exc.daily_limit} scans a day and it is "
+            f"currently used up. Try again in about {when}, or add a paid Gemini key to "
+            f"lift the limit. Searching for food still works normally."
+        )
+    return (
+        f"The AI is briefly rate-limited. Try again in about {when} — "
+        f"searching for food still works normally."
+    )
+
+
 def get_vision_client() -> VisionClient:
     """Injectable so tests can substitute a fake without touching the network."""
     return VisionClient()
@@ -102,13 +126,14 @@ async def scan_meal(
             ),
         ) from exc
     except VisionQuotaExhausted as exc:
+        # Google's own numbers, not ours. The previous version said "the daily
+        # allowance is used up, try again later" and set an hour for every 429 —
+        # so a user who had scanned nothing was told to come back tomorrow when
+        # the real wait was forty seconds.
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="The daily photo-scanning allowance is used up. Try again later.",
-            # An hour is a guess — Gemini's free tier resets per minute for rate
-            # and per day for volume, and the 429 does not say which was hit.
-            # Erring long is kinder than telling the user to retry into a wall.
-            headers={"Retry-After": "3600"},
+            detail=_quota_message(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
         ) from exc
     except VisionUnavailable as exc:
         logger.warning("Vision analysis failed: %s", exc)
@@ -188,6 +213,9 @@ async def _estimate_missing(
     try:
         estimates = await vision.estimate_nutrition(names)
     except (VisionUnavailable, VisionQuotaExhausted, VisionNotConfigured) as exc:
+        # Quota spent partway through a scan is the common case on a free tier:
+        # identification succeeded, estimation did not. Leaving the item
+        # unmatched is exactly right — the user keeps everything that matched.
         logger.info("Nutrition estimation unavailable, leaving %d unmatched: %s", len(names), exc)
         return {}
 

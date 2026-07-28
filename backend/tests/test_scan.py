@@ -314,12 +314,20 @@ async def test_missing_api_key_is_503_with_instructions(client: TestClient, use_
 
 
 async def test_quota_exhausted_is_429_with_retry_after(client: TestClient, use_vision) -> None:
-    use_vision(FakeVision(error=VisionQuotaExhausted("spent")))
+    use_vision(
+        FakeVision(
+            error=VisionQuotaExhausted("spent", retry_after_seconds=52, daily_limit=20)
+        )
+    )
 
     response = client.post("/api/v1/scan", json={"image_base64": IMAGE}, headers=authed(client))
 
     assert response.status_code == 429
-    assert response.headers["Retry-After"] == "3600"
+    # Google's own delay, not a hardcoded hour.
+    assert response.headers["Retry-After"] == "52"
+    # The cap is named, so "limit reached" reads as a fact about this server's
+    # free tier rather than as a penalty the user earned.
+    assert "20 scans a day" in response.json()["detail"]
 
 
 async def test_upstream_failure_is_502(client: TestClient, use_vision) -> None:

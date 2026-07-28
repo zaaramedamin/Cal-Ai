@@ -125,8 +125,8 @@ export default function ScanScreen() {
         // `canAskAgain: false` means the OS will no longer show the dialog, so
         // telling the user to "allow it next time" would be a dead end.
         message: permission.canAskAgain
-          ? 'CalAi needs permission to read the photo so it can identify the food in it.'
-          : 'Turn it back on in your device Settings under CalAi, then try again.',
+          ? 'Cal Ai needs permission to read the photo so it can identify the food in it.'
+          : 'Turn it back on in your device Settings under Cal Ai, then try again.',
       });
       return;
     }
@@ -301,7 +301,7 @@ function ChoosePhoto({ onChoose }: { onChoose: (source: 'camera' | 'library') =>
       <View style={styles.chooseIntro}>
         <Text style={text.title}>Photograph your meal</Text>
         <Text style={[text.bodyMuted, styles.chooseBody]}>
-          CalAi identifies the foods and estimates portion sizes. You confirm both before
+          Cal Ai identifies the foods and estimates portion sizes. You confirm both before
           anything is logged — and the nutrition itself always comes from USDA, never from
           the photo.
         </Text>
@@ -479,7 +479,7 @@ function Review({
         {unmatched > 0 && (
           <Text style={styles.unmatchedNote}>
             {unmatched} item{unmatched === 1 ? '' : 's'} had no match in the food database.
-            Rather than invent numbers for {unmatched === 1 ? 'it' : 'them'}, CalAi leaves{' '}
+            Rather than invent numbers for {unmatched === 1 ? 'it' : 'them'}, Cal Ai leaves{' '}
             {unmatched === 1 ? 'it' : 'them'} out — search manually to add{' '}
             {unmatched === 1 ? 'it' : 'them'}.
           </Text>
@@ -634,8 +634,15 @@ function describeScanFailure(caught: unknown): { title: string; message: string 
 
   if (caught.status === 429) {
     return {
-      title: 'Scanning limit reached',
-      message: caught.userMessage,
+      // Not "limit reached", which reads as a punishment for something the user
+      // did. On a shared free-tier key the cap is usually spent by someone else
+      // — or by a test run — and the wait is seconds, so the title says so and
+      // the server's message carries the actual number.
+      title: 'The AI is busy right now',
+      // `detail` rather than `userMessage`: the client's generic rate-limit copy
+      // would overwrite the server's specific explanation of which cap was hit
+      // and how long it lasts.
+      message: caught.detail ?? caught.userMessage,
     };
   }
 

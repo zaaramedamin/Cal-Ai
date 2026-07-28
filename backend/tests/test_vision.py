@@ -14,6 +14,7 @@ import pytest
 
 from app.core.config import get_settings
 from app.services.vision import (
+    DEFAULT_QUOTA_RETRY_SECONDS,
     MAX_ITEM_GRAMS,
     MAX_OUTPUT_TOKENS,
     THINKING_BUDGET_TOKENS,
@@ -21,6 +22,7 @@ from app.services.vision import (
     VisionQuotaExhausted,
     VisionUnavailable,
     _parse_nutrition,
+    _quota_error,
     parse_vision_response,
 )
 
@@ -294,7 +296,7 @@ async def test_gives_up_after_the_retry(gemini_key) -> None:
 
 async def test_never_retries_a_quota_error(gemini_key) -> None:
     """Retrying a spent quota just spends more of a budget shared with others."""
-    upstream = Upstream((429, {"error": "quota"}))
+    upstream = Upstream((429, REAL_QUOTA_429))
     async with upstream.client() as client:
         with pytest.raises(VisionQuotaExhausted):
             await VisionClient(client).analyse_meal("Zm9v", "image/jpeg")
@@ -330,3 +332,89 @@ async def test_request_budgets_room_for_the_answer_after_thinking(gemini_key) ->
     assert config["max_output_tokens"] == MAX_OUTPUT_TOKENS
     assert config["thinkingConfig"]["thinkingBudget"] == THINKING_BUDGET_TOKENS
     assert THINKING_BUDGET_TOKENS < MAX_OUTPUT_TOKENS
+
+
+# --------------------------------------------------------------------------- #
+# Quota errors: say what Google said, not what we guessed.
+# --------------------------------------------------------------------------- #
+
+#: A real 429 recorded from the API, not a hand-built approximation. The shape
+#: is the whole point of these tests — the wait lives in a RetryInfo detail and
+#: the cap in a QuotaFailure violation, and a test written from what the parser
+#: expects would not have caught the parser reading neither.
+REAL_QUOTA_429 = {
+    "error": {
+        "code": 429,
+        "message": (
+            "You exceeded your current quota, please check your plan and billing details. "
+            "* Quota exceeded for metric: "
+            "generativelanguage.googleapis.com/generate_content_free_tier_requests, "
+            "limit: 20, model: gemini-3.6-flash\nPlease retry in 51.789151978s."
+        ),
+        "status": "RESOURCE_EXHAUSTED",
+        "details": [
+            {
+                "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                "violations": [
+                    {
+                        "quotaMetric": (
+                            "generativelanguage.googleapis.com/"
+                            "generate_content_free_tier_requests"
+                        ),
+                        "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+                        "quotaValue": "20",
+                    }
+                ],
+            },
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "51s"},
+        ],
+    }
+}
+
+
+def test_quota_error_uses_googles_own_retry_delay() -> None:
+    """The bug this replaced told every user to wait an hour.
+
+    A scan that fails with "come back tomorrow" when the real wait is under a
+    minute does not just annoy — it teaches the user the feature is broken, and
+    they stop trying.
+    """
+    exc = _quota_error(REAL_QUOTA_429, "")
+
+    # Rounded up: retrying exactly on the boundary just earns a second 429.
+    assert exc.retry_after_seconds == 52
+    assert exc.daily_limit == 20
+
+
+def test_quota_error_falls_back_to_a_minute_not_an_hour() -> None:
+    """When Google says nothing, guess short.
+
+    A wrong short guess costs one wasted retry. A wrong long guess costs the
+    user the feature for the rest of the day.
+    """
+    exc = _quota_error({"error": {"message": "quota"}}, "")
+
+    assert exc.retry_after_seconds == DEFAULT_QUOTA_RETRY_SECONDS
+    assert exc.daily_limit is None
+
+
+def test_quota_error_reads_the_delay_from_prose_when_details_are_missing() -> None:
+    """Some 429s carry the delay only in the message body."""
+    raw = '{"error": {"message": "slow down", "details": [], "retryDelay": "7s"}}'
+
+    exc = _quota_error({"error": {"message": "slow down", "details": []}}, raw)
+
+    assert exc.retry_after_seconds == 8
+
+
+async def test_a_429_is_reported_with_the_real_wait(gemini_key) -> None:
+    """End to end through the client: no retry, and the delay is preserved."""
+    upstream = Upstream((429, REAL_QUOTA_429))
+    async with upstream.client() as client:
+        with pytest.raises(VisionQuotaExhausted) as caught:
+            await VisionClient(client).analyse_meal("Zm9v", "image/jpeg")
+
+    assert caught.value.retry_after_seconds == 52
+    assert caught.value.daily_limit == 20
+    # Retrying a spent quota spends more of a budget shared with other users.
+    assert upstream.calls == 1

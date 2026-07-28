@@ -1,5 +1,5 @@
 /**
- * The "with CalAi / without CalAi" weight projection.
+ * The "with Cal Ai / without Cal Ai" weight projection.
  *
  * **This chart is illustrative, and the code says so out loud.**
  *
@@ -79,7 +79,7 @@ export function ProjectionChart({
   const usable = H - padTop - padBottom;
 
   const losing = endValue < startValue;
-  // The "with CalAi" line always travels most of the vertical space, so the
+  // The "with Cal Ai" line always travels most of the vertical space, so the
   // shape reads the same whether the goal is loss or gain.
   const startY = losing ? padTop : padTop + usable;
   const endY = losing ? padTop + usable : padTop;
@@ -137,7 +137,7 @@ export function ProjectionChart({
 
       <Text style={[styles.axis, styles.axisLeft]}>Now</Text>
       <Text style={[styles.axis, styles.axisRight]}>{endLabel}</Text>
-      <Text style={styles.withoutLabel}>Without CalAi</Text>
+      <Text style={styles.withoutLabel}>Without Cal Ai</Text>
     </View>
   );
 }

@@ -14,6 +14,7 @@ import { requestPasswordReset } from '@/api/auth';
 import { ApiError } from '@/api/client';
 import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
+import { Wordmark } from '@/components/wordmark';
 import { TextField } from '@/components/text-field';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -63,7 +64,7 @@ export default function ForgotPasswordScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Text style={text.overline}>CalAi</Text>
+          <Wordmark size={18} />
           <Text style={text.title}>{sent ? 'Check your email' : 'Reset your password'}</Text>
 
           {sent ? (

@@ -23,6 +23,7 @@ import { confirmPasswordReset } from '@/api/auth';
 import { ApiError } from '@/api/client';
 import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
+import { Wordmark } from '@/components/wordmark';
 import { TextField } from '@/components/text-field';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -78,7 +79,7 @@ export default function ResetPasswordScreen() {
     return (
       <Screen>
         <View style={styles.doneBlock}>
-          <Text style={text.overline}>CalAi</Text>
+          <Wordmark size={18} />
           <Text style={text.title}>Password updated</Text>
           <Text style={[text.bodyMuted, styles.subtitle]}>
             You&apos;ve been signed out everywhere else as a precaution. Sign in with your new
@@ -101,7 +102,7 @@ export default function ResetPasswordScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Text style={text.overline}>CalAi</Text>
+          <Wordmark size={18} />
           <Text style={text.title}>Choose a new password</Text>
           <Text style={[text.bodyMuted, styles.subtitle]}>
             Reset codes expire 30 minutes after they&apos;re sent and work only once.

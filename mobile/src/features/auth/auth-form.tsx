@@ -23,6 +23,7 @@ import { ApiError } from '@/api/client';
 import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { Wordmark } from '@/components/wordmark';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -136,7 +137,7 @@ export function AuthForm({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Text style={text.overline}>CalAi</Text>
+          <Wordmark size={18} />
           <Text style={text.title}>{title}</Text>
           <Text style={[text.bodyMuted, styles.subtitle]}>{subtitle}</Text>
 

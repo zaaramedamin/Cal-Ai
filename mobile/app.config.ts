@@ -30,7 +30,10 @@ const config: ExpoConfig = {
 
   android: {
     adaptiveIcon: {
-      backgroundColor: '#F4F5F7',
+      // Black, matching the launcher icon. The adaptive background is a flat
+      // colour behind the foreground layer, so it has to agree with the mark or
+      // the icon reads differently on launchers that use a round mask.
+      backgroundColor: '#111216',
       foregroundImage: './assets/images/android-icon-foreground.png',
       backgroundImage: './assets/images/android-icon-background.png',
       monochromeImage: './assets/images/android-icon-monochrome.png',

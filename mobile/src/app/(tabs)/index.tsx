@@ -38,6 +38,7 @@ import { CountUp, EnterUp, GrowBar, PressableScale } from '@/components/motion';
 import { ProgressRing } from '@/components/progress-ring';
 import { Screen } from '@/components/screen';
 import { WeekStrip } from '@/components/week-strip';
+import { Wordmark } from '@/components/wordmark';
 import { HIT_SLOP_MIN, color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
@@ -173,7 +174,7 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>{greeting()}</Text>
-          <Text style={styles.wordmark}>CalAi</Text>
+          <Wordmark size={24} />
         </View>
         {streak !== null && streak > 0 && (
           <Animated.View entering={FadeIn.duration(300)} style={styles.streakPill}>
@@ -534,12 +535,6 @@ const styles = StyleSheet.create({
     marginBottom: space.md,
   },
   greeting: { ...text.bodyMuted, fontSize: 13 },
-  wordmark: {
-    fontFamily: fontFamily.extraBold,
-    fontSize: 24,
-    letterSpacing: -0.6,
-    color: color.ink,
-  },
   streakPill: {
     flexDirection: 'row',
     alignItems: 'center',
