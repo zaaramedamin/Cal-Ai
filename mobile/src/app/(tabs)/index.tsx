@@ -33,6 +33,7 @@ import {
   logFood,
 } from '@/api/diary';
 import { getProgress } from '@/api/progress';
+import { type Suggestion, getSuggestions } from '@/api/suggestions';
 import { Card } from '@/components/card';
 import { CountUp, EnterUp, GrowBar, PressableScale } from '@/components/motion';
 import { ProgressRing } from '@/components/progress-ring';
@@ -71,6 +72,8 @@ export default function HomeScreen() {
   const [quickAdd, setQuickAdd] = useState<QuickAddFood[]>([]);
   const [addingId, setAddingId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestionNote, setSuggestionNote] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setState({ kind: 'ready', summary: await getDay(day) });
@@ -118,6 +121,17 @@ export default function HomeScreen() {
         }
       })();
 
+      (async () => {
+        try {
+          const response = await getSuggestions();
+          if (cancelled) return;
+          setSuggestions(response.suggestions);
+          setSuggestionNote(response.note);
+        } catch {
+          /* the card simply doesn't render */
+        }
+      })();
+
       return () => {
         cancelled = true;
       };
@@ -137,8 +151,12 @@ export default function HomeScreen() {
         localDate: day,
       });
       await reload();
-      // Refreshed after logging, because this log may have changed the ranking.
+      // Both refreshed after logging: the ranking may have changed, and the
+      // remaining budget certainly has, which is what suggestions are ranked on.
       setQuickAdd(await getQuickAdd());
+      const next = await getSuggestions();
+      setSuggestions(next.suggestions);
+      setSuggestionNote(next.note);
     } catch (caught) {
       Alert.alert(
         'Could not log that',
@@ -203,6 +221,8 @@ export default function HomeScreen() {
         <Dashboard
           summary={state.summary}
           quickAdd={quickAdd}
+          suggestions={suggestions}
+          suggestionNote={suggestionNote}
           addingId={addingId}
           onQuickAdd={(food) => void handleQuickAdd(food)}
           onDelete={confirmDelete}
@@ -290,16 +310,21 @@ function FabAction({
 function Dashboard({
   summary,
   quickAdd,
+  suggestions,
+  suggestionNote,
   addingId,
   onQuickAdd,
   onDelete,
 }: {
   summary: DaySummary;
   quickAdd: QuickAddFood[];
+  suggestions: Suggestion[];
+  suggestionNote: string | null;
   addingId: string | null;
   onQuickAdd: (food: QuickAddFood) => void;
   onDelete: (entry: DiaryEntry) => void;
 }) {
+  const router = useRouter();
   const eaten = summary.totals.kcal;
   const remaining = summary.remaining_calories;
   const over = remaining < 0;
@@ -384,10 +409,60 @@ function Dashboard({
         </EnterUp>
       )}
 
+      {(suggestions.length > 0 || suggestionNote) && (
+        <EnterUp index={3}>
+          <Card style={styles.suggestCard}>
+            <View style={styles.suggestHead}>
+              <View style={styles.suggestIcon}>
+                <Ionicons name="bulb-outline" size={16} color={color.accent} />
+              </View>
+              <Text style={text.heading}>What to eat next</Text>
+            </View>
+
+            {suggestions.length === 0 ? (
+              <Text style={styles.suggestNote}>{suggestionNote}</Text>
+            ) : (
+              suggestions.map((suggestion) => (
+                <PressableScale
+                  key={suggestion.food.id}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/food/[id]',
+                      params: { id: suggestion.food.id, slot: slotForNow() },
+                    })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`${suggestion.food.name}, ${Math.round(
+                    suggestion.grams,
+                  )} grams`}
+                  style={styles.suggestRow}
+                  scaleTo={0.985}
+                >
+                  <View style={styles.suggestText}>
+                    <Text style={text.label} numberOfLines={1}>
+                      {suggestion.food.name}
+                    </Text>
+                    {/* The reason is the point. A recommendation with no stated
+                        reason is indistinguishable from an advertisement. */}
+                    <Text style={styles.suggestReason} numberOfLines={2}>
+                      {suggestion.reason}
+                    </Text>
+                  </View>
+                  <View style={styles.suggestAmount}>
+                    <Text style={styles.suggestGrams}>{Math.round(suggestion.grams)} g</Text>
+                    <Text style={styles.suggestKcal}>{Math.round(suggestion.kcal)} kcal</Text>
+                  </View>
+                </PressableScale>
+              ))
+            )}
+          </Card>
+        </EnterUp>
+      )}
+
       <Text style={styles.sectionTitle}>Logged today</Text>
 
       {entries.length === 0 ? (
-        <EnterUp index={3}>
+        <EnterUp index={4}>
           <Card>
             <Text style={text.label}>Nothing logged yet</Text>
             <Text style={[text.bodyMuted, styles.emptyBody]}>
@@ -399,7 +474,7 @@ function Dashboard({
         </EnterUp>
       ) : (
         entries.map((entry, index) => (
-          <EnterUp key={entry.id} index={3 + index}>
+          <EnterUp key={entry.id} index={4 + index}>
             <PressableScale
               onLongPress={() => onDelete(entry)}
               accessibilityRole="button"
@@ -615,6 +690,32 @@ const styles = StyleSheet.create({
   chipMeta: { ...text.bodyMuted, fontSize: 11 },
 
   sectionTitle: { ...text.heading, marginTop: space.sm },
+
+  suggestCard: { gap: space.md },
+  suggestHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  suggestIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.pill,
+    backgroundColor: color.accentTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestNote: { ...text.bodyMuted, fontSize: 13, lineHeight: 18 },
+  suggestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.md,
+    paddingVertical: space.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.hairline,
+  },
+  suggestText: { flex: 1, gap: 2 },
+  suggestReason: { ...text.bodyMuted, fontSize: 12, lineHeight: 16 },
+  suggestAmount: { alignItems: 'flex-end' },
+  suggestGrams: { ...text.numeric, fontSize: 15 },
+  suggestKcal: { ...text.bodyMuted, fontSize: 11 },
 
   entryCard: {
     flexDirection: 'row',

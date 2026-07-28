@@ -15,8 +15,15 @@ from app.core.rate_limit import RateLimit
 from app.db.models.diary import DiaryEntry
 from app.db.models.food import Food
 from app.db.session import get_session
-from app.schemas.food import FoodRead, FoodSearchResponse, FoodSearchResult, QuickAddFood
+from app.schemas.food import (
+    FoodRead,
+    FoodSearchResponse,
+    FoodSearchResult,
+    PopularFoodRead,
+    QuickAddFood,
+)
 from app.services.food_cache import search_foods
+from app.services.popular_foods import POPULAR_FOODS
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +147,33 @@ async def quick_add(
             times_logged=times,
         )
         for food, quantity, slot, times in result
+    ]
+
+
+@router.get(
+    "/popular",
+    response_model=list[PopularFoodRead],
+    summary="A short curated list of foods people actually log",
+)
+async def popular(user: CurrentUser) -> list[PopularFoodRead]:
+    """The browse menu: short names and emoji, grouped into sections.
+
+    Static and free — no database work, no upstream call — because it is a menu
+    rather than data. The nutrition still comes from USDA: each entry carries the
+    `search_term` that finds the authoritative row, and the app resolves it when
+    the user taps.
+
+    Requires auth only for consistency with the rest of the food routes; there is
+    nothing sensitive here.
+    """
+    return [
+        PopularFoodRead(
+            name=food.name,
+            emoji=food.emoji,
+            search_term=food.search_term,
+            category=food.category,
+        )
+        for food in POPULAR_FOODS
     ]
 
 

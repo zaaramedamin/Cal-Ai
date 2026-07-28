@@ -186,3 +186,23 @@ export function addDays(isoDate: string, delta: number): string {
   date.setDate(date.getDate() + delta);
   return localDateString(date);
 }
+
+export interface PopularFood {
+  name: string;
+  /** Stands in for a photograph — see backend/app/services/popular_foods.py. */
+  emoji: string;
+  /** What to search USDA with when the user taps. Never shown. */
+  search_term: string;
+  category: string;
+}
+
+/**
+ * The curated browse menu.
+ *
+ * Note it carries no nutrition. These are menu entries, not foods: tapping one
+ * runs a normal search for its `search_term`, so every number still arrives
+ * from USDA through the same path as a typed search.
+ */
+export function getPopularFoods(): Promise<PopularFood[]> {
+  return apiRequest<PopularFood[]>('/api/v1/foods/popular', { authenticated: true });
+}

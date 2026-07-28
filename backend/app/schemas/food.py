@@ -86,3 +86,19 @@ class FoodSearchResponse(BaseModel):
     #: True when results came only from our cache because USDA was unreachable.
     # The app says so rather than pretending the list is complete.
     upstream_unavailable: bool = False
+
+
+class PopularFoodRead(BaseModel):
+    """One entry in the curated browse list.
+
+    Note what is absent: any nutrition value. This is a menu entry, not a food —
+    the numbers arrive when `search_term` is resolved against USDA, which keeps
+    the curated list from becoming a second, unmaintained source of truth.
+    """
+
+    name: str
+    #: Stands in for a photograph. See services/popular_foods.py for why.
+    emoji: str
+    #: What to search USDA with. Not shown to the user.
+    search_term: str
+    category: str

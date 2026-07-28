@@ -13,16 +13,25 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
 import { ApiError } from '@/api/client';
-import { MEAL_LABELS, type FoodSearchResult, type MealSlot, searchFoods } from '@/api/diary';
+import {
+  MEAL_LABELS,
+  type FoodSearchResult,
+  type MealSlot,
+  type PopularFood,
+  getPopularFoods,
+  searchFoods,
+} from '@/api/diary';
 import { MacroBar } from '@/components/macro-bar';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { PressableScale } from '@/components/motion';
 import { draftActions } from '@/features/recipes/draft-store';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -52,6 +61,25 @@ export default function SearchScreen() {
 
   const [query, setQuery] = useState(q ?? '');
   const [state, setState] = useState<State>({ kind: 'idle' });
+  // The curated menu, shown while the box is empty. Fetched once and cached in
+  // state: it is a static list, so refetching it on every keystroke-clear would
+  // be pure waste.
+  const [popular, setPopular] = useState<PopularFood[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const foods = await getPopularFoods();
+        if (!cancelled) setPopular(foods);
+      } catch {
+        /* the grid simply doesn't render; typing still works */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Tracks the most recent query so a slow response for an earlier one cannot
   // overwrite results for a later one — the classic out-of-order race that makes
@@ -117,14 +145,24 @@ export default function SearchScreen() {
         returnKeyType="search"
       />
 
-      {state.kind === 'idle' && (
-        <View style={styles.centered}>
-          <Text style={text.bodyMuted}>
-            Type at least {MIN_QUERY_LENGTH} characters. Results come from USDA FoodData
-            Central — every number is traceable to its source.
-          </Text>
-        </View>
-      )}
+      {state.kind === 'idle' &&
+        (popular.length > 0 ? (
+          // A menu beats a blank box. USDA has 300,000 entries and searching it
+          // cold means guessing which of forty chicken variants you meant; this
+          // is the short list of things people actually log, with the emoji
+          // doing the work a thumbnail would in an app that could afford one.
+          <PopularGrid
+            foods={popular}
+            onPick={(food) => setQuery(food.search_term)}
+          />
+        ) : (
+          <View style={styles.centered}>
+            <Text style={text.bodyMuted}>
+              Type at least {MIN_QUERY_LENGTH} characters. Results come from USDA FoodData
+              Central — every number is traceable to its source.
+            </Text>
+          </View>
+        ))}
 
       {state.kind === 'searching' && (
         <View style={styles.centered}>
@@ -215,7 +253,78 @@ export default function SearchScreen() {
   );
 }
 
+/**
+ * The curated browse grid, grouped into sections.
+ *
+ * Tapping fills the search box rather than navigating straight to a food. That
+ * is deliberate: it keeps one path to the food detail screen, so a tap here and
+ * a typed search behave identically and the user can see and adjust the term
+ * that produced the results.
+ */
+function PopularGrid({
+  foods,
+  onPick,
+}: {
+  foods: PopularFood[];
+  onPick: (food: PopularFood) => void;
+}) {
+  const categories = foods.reduce<Record<string, PopularFood[]>>((groups, food) => {
+    (groups[food.category] ??= []).push(food);
+    return groups;
+  }, {});
+
+  return (
+    <ScrollView
+      contentContainerStyle={styles.gridScroll}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+      {Object.entries(categories).map(([category, items]) => (
+        <View key={category} style={styles.gridSection}>
+          <Text style={styles.gridHeading}>{category}</Text>
+          <View style={styles.grid}>
+            {items.map((food) => (
+              <PressableScale
+                key={food.name}
+                onPress={() => onPick(food)}
+                accessibilityRole="button"
+                accessibilityLabel={food.name}
+                style={styles.tile}
+              >
+                <Text style={styles.tileEmoji}>{food.emoji}</Text>
+                <Text style={styles.tileName} numberOfLines={2}>
+                  {food.name}
+                </Text>
+              </PressableScale>
+            ))}
+          </View>
+        </View>
+      ))}
+      <Text style={styles.gridFootnote}>
+        Tap one to look it up. Every number still comes from USDA FoodData Central.
+      </Text>
+    </ScrollView>
+  );
+}
+
 const styles = StyleSheet.create({
+  gridScroll: { paddingTop: space.lg, paddingBottom: space.xxl, gap: space.lg },
+  gridSection: { gap: space.sm },
+  gridHeading: { ...text.overline, color: color.inkMuted },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  tile: {
+    width: '23%',
+    aspectRatio: 0.86,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingHorizontal: 2,
+    borderRadius: radius.md,
+    backgroundColor: color.surface,
+  },
+  tileEmoji: { fontSize: 26 },
+  tileName: { ...text.bodyMuted, fontSize: 10, textAlign: 'center', lineHeight: 12 },
+  gridFootnote: { ...text.bodyMuted, fontSize: 11, textAlign: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
