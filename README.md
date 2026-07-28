@@ -3,8 +3,9 @@
 A calorie and macronutrient tracking app. Set your body stats and a goal, get evidence-based daily
 calorie and macro targets, then log what you eat against them.
 
-**Status: Phase 0 — foundation.** The full pipe is proven end to end (phone → API → Postgres) and
-nothing else is built yet. Feature phases are listed at the bottom.
+**Status: phases 0–5 shipped, plus AI photo scanning.** Auth, onboarding and targets, USDA search,
+the diary, recipes, meal photo scanning, quick-add and meal suggestions all work end to end.
+Remaining phases are listed at the bottom.
 
 ---
 
@@ -28,7 +29,7 @@ prices, the user decides.
 
 | Layer | Choice |
 |---|---|
-| Mobile | Expo SDK 57 (React Native 0.86, React 19.2), TypeScript strict, expo-router |
+| Mobile | Expo SDK 54 (React Native 0.81, React 19.1), TypeScript strict, expo-router |
 | Backend | FastAPI, Python 3.13, SQLAlchemy 2.0 async, Pydantic v2 |
 | Database | PostgreSQL 16 via Docker Compose |
 | Migrations | Alembic, from the very first table |
@@ -144,10 +145,36 @@ activation does, since activating a virtualenv only prepends `.venv\Scripts` to 
 
 ---
 
-## The two things that will break on Windows
+## The three things that will break on Windows
 
-Both of these produce a "cannot reach the backend" error with no obvious cause. The app's error
-screen names them, and here they are in full.
+All of these produce a "cannot reach the backend" error, or an app that never finishes loading,
+with no obvious cause. The app's error screen names the first two, and here they are in full.
+
+### Expo picks the wrong IP when WSL or Hyper-V is installed
+
+`ipconfig` on this machine lists three IPv4 addresses:
+
+```
+192.168.1.124   Wi-Fi          <- the only one the phone can reach
+172.21.80.1     vEthernet (WSL)
+172.17.96.1     vEthernet (Default Switch)
+```
+
+Expo picks one of them to advertise to the phone, and it does not always pick the Wi-Fi one. When
+it picks a virtual adapter the failure is total and confusing: the phone cannot fetch the JS
+bundle, **and** it cannot reach the API either — `resolveApiBaseUrl()` in `mobile/src/api/client.ts`
+derives the backend host from the same address Expo served the bundle from. One wrong guess breaks
+both, and the app simply never starts.
+
+Pin it explicitly:
+
+```powershell
+$env:REACT_NATIVE_PACKAGER_HOSTNAME = "192.168.1.124"   # your Wi-Fi IP, from ipconfig
+npx expo start -c
+```
+
+Check it worked — the printed URL and the QR code should both show the Wi-Fi address, not a
+`172.x` one.
 
 ### uvicorn must bind `0.0.0.0`
 
