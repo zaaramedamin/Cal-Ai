@@ -93,26 +93,33 @@ def compute_totals(resolved: list[tuple[CatalogueFood, float]]) -> MealTotals:
     )
 
 
+def _item_read(food: CatalogueFood, amount: float) -> MealItemRead:
+    grams = grams_for(food, amount)
+    return MealItemRead(
+        slug=food.slug,
+        name_en=food.name_en,
+        name_fr=food.name_fr,
+        emoji=food.emoji,
+        photo=food.photo,
+        unit=food.unit,
+        amount=amount,
+        grams=grams,
+        grams_per_unit=food.grams_per_unit,
+        kcal=round(food.kcal * grams / 100.0, 2),
+        kcal_per_100g=food.kcal,
+        protein_g_per_100g=food.protein_g,
+        carbs_g_per_100g=food.carbs_g,
+        fat_g_per_100g=food.fat_g,
+    )
+
+
 async def to_read(doc: dict[str, Any]) -> MealRead:
     resolved, missing = await _resolve(doc.get("items", []))
 
     return MealRead(
         id=str(doc["_id"]),
         name=doc["name"],
-        items=[
-            MealItemRead(
-                slug=food.slug,
-                name_en=food.name_en,
-                name_fr=food.name_fr,
-                emoji=food.emoji,
-                photo=food.photo,
-                unit=food.unit,
-                amount=amount,
-                grams=grams_for(food, amount),
-                kcal=round(food.kcal * grams_for(food, amount) / 100.0, 2),
-            )
-            for food, amount in resolved
-        ],
+        items=[_item_read(food, amount) for food, amount in resolved],
         totals=compute_totals(resolved),
         created_at=doc["created_at"],
         missing_slugs=missing,

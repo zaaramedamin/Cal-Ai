@@ -254,6 +254,26 @@ export default function HomeScreen() {
               router.push({ pathname: '/scan', params: { day } });
             }}
           />
+          {/* Ordered above search on purpose. The catalogue is the path that
+              works for someone who does not already know what USDA calls their
+              food, which is most people most of the time; search is the escape
+              hatch for the thing the catalogue does not carry. */}
+          <FabAction
+            icon="restaurant"
+            label="My meals"
+            onPress={() => {
+              setMenuOpen(false);
+              router.push('/meals');
+            }}
+          />
+          <FabAction
+            icon="nutrition"
+            label="Ingredients"
+            onPress={() => {
+              setMenuOpen(false);
+              router.push({ pathname: '/catalogue', params: { slot: slotForNow(), day } });
+            }}
+          />
           <FabAction
             icon="search"
             label="Search food"

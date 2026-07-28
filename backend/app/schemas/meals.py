@@ -72,8 +72,22 @@ class MealItemRead(BaseModel):
     unit: UnitKind
     amount: float
     grams: float
+    #: What one of this food's units weighs, so the builder can preview a weight
+    #: as the amount changes without asking the server between keystrokes.
+    grams_per_unit: float
     #: This ingredient's contribution to the meal, already scaled.
     kcal: float
+
+    # --- per 100 g -------------------------------------------------------
+    # Carried so the builder's live totals are honest while editing a saved
+    # meal. Without them the client can recover kcal by dividing out the grams
+    # but has no route back to the macros, and would have to either show zeros
+    # or refetch the whole catalogue to fill them in. Same shape as
+    # `IngredientRead` on recipes, for the same reason.
+    kcal_per_100g: float
+    protein_g_per_100g: float
+    carbs_g_per_100g: float
+    fat_g_per_100g: float
 
 
 class MealTotals(BaseModel):

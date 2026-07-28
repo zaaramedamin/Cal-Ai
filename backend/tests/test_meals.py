@@ -54,6 +54,23 @@ def test_each_ingredient_reports_its_own_contribution(client: TestClient, catalo
     assert milk["amount"] == 250  # still millilitres to the user
 
 
+def test_each_ingredient_carries_its_per_100g_values(client: TestClient, catalogue) -> None:
+    """So the builder's live totals stay honest while editing a saved meal.
+
+    Without these the client can divide the contribution back out for kcal but
+    has no route to the macros, and would show zeros for protein while the user
+    edits — numbers that look measured and are not.
+    """
+    headers = onboarded(client)
+
+    milk = client.post("/api/v1/meals", json=BREAKFAST, headers=headers).json()["items"][1]
+
+    assert milk["kcal_per_100g"] == 61.0
+    assert milk["protein_g_per_100g"] == pytest.approx(3.15)
+    # And the conversion factor, so a changed amount previews without a round trip.
+    assert milk["grams_per_unit"] == 1.03
+
+
 def test_a_gap_in_one_ingredient_makes_the_total_partial(client: TestClient, catalogue) -> None:
     """The egg reports 0 g of fibre; the milk reports none at all.
 
