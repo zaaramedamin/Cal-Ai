@@ -60,7 +60,13 @@ export function CountUp({
   // Held in React state rather than driven through an animated prop, because
   // the value has to be *formatted* — thousands separators, rounding — and that
   // is string work a worklet cannot do.
-  const [shown, setShown] = useState(value);
+  //
+  // Starts at 0, not at `value`. Seeding it with the target made the first
+  // render already correct, so the effect below saw a delta of zero and
+  // returned — the number never counted once, on the one render where counting
+  // is the entire point. Subsequent updates still animate from wherever the
+  // display had got to, which is what makes a changing total look continuous.
+  const [shown, setShown] = useState(0);
 
   useEffect(() => {
     const from = shown;

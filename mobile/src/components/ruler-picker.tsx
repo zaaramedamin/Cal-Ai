@@ -58,27 +58,45 @@ export function RulerPicker({
   reference,
 }: RulerPickerProps) {
   const scrollRef = useRef<ScrollView>(null);
-  // Guards the initial scroll-to-position, which would otherwise fire onChange
-  // with the value it was just given and fight whatever the parent set.
-  const settled = useRef(false);
+
+  /**
+   * Marks a value change as originating from the user's own drag.
+   *
+   * Without it, this component fights itself: the drag reports a new value, the
+   * parent stores it, the effect below sees `value` change and scrolls to
+   * "correct" it, and the ruler stutters under the finger. With it, the effect
+   * only moves the ruler when something *else* changed the value.
+   */
+  const fromDrag = useRef(false);
 
   const ticks = Math.round(max - min) + 1;
   const contentWidth = (ticks - 1) * TICK_SPACING;
 
   useEffect(() => {
-    if (settled.current) return;
-    settled.current = true;
-    // Without the frame delay the ScrollView has not laid out and the offset is
-    // silently ignored, leaving every picker showing its minimum.
+    if (fromDrag.current) {
+      fromDrag.current = false;
+      return;
+    }
+    // Runs on mount *and* whenever the value or the scale changes externally.
+    // The first version guarded this with a one-shot ref, which meant switching
+    // kg to lbs re-labelled the ticks and left the ruler parked at the old
+    // offset — the readout said 176 while the needle still pointed at 80.
+    //
+    // The frame delay is still needed: without it the ScrollView has not laid
+    // out yet and the offset is silently ignored, leaving the picker at its
+    // minimum.
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({ x: (value - min) * TICK_SPACING, animated: false });
     });
-  }, [value, min]);
+  }, [value, min, max]);
 
   function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
     const next = Math.round(event.nativeEvent.contentOffset.x / TICK_SPACING) + min;
     const clamped = Math.min(max, Math.max(min, next));
-    if (clamped !== value) onChange(clamped);
+    if (clamped !== value) {
+      fromDrag.current = true;
+      onChange(clamped);
+    }
   }
 
   return (

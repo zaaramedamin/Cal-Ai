@@ -20,10 +20,10 @@ import {
 } from 'react-native';
 
 import { ApiError } from '@/api/client';
+import { AuthHero } from '@/components/auth-hero';
 import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
-import { Wordmark } from '@/components/wordmark';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -33,6 +33,8 @@ const PASSWORD_MIN_LENGTH = 8;
 export interface AuthFormProps {
   title: string;
   subtitle: string;
+  /** One line over the hero image. Sets the tone before the form is read. */
+  strapline: string;
   submitLabel: string;
   footerText: string;
   footerLinkLabel: string;
@@ -53,6 +55,7 @@ interface FieldErrors {
 export function AuthForm({
   title,
   subtitle,
+  strapline,
   submitLabel,
   footerText,
   footerLinkLabel,
@@ -137,11 +140,13 @@ export function AuthForm({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Wordmark size={18} />
-          <Text style={text.title}>{title}</Text>
-          <Text style={[text.bodyMuted, styles.subtitle]}>{subtitle}</Text>
+          <AuthHero strapline={strapline} />
 
-          <View style={styles.fields}>
+          <View style={styles.body}>
+            <Text style={text.title}>{title}</Text>
+            <Text style={[text.bodyMuted, styles.subtitle]}>{subtitle}</Text>
+
+            <View style={styles.fields}>
             <TextField
               label="Email"
               value={email}
@@ -199,29 +204,34 @@ export function AuthForm({
                 editable={!submitting}
               />
             )}
-          </View>
-
-          {showForgotPassword && (
-            <Link href="/forgot-password" style={styles.forgotLink}>
-              Forgot your password?
-            </Link>
-          )}
-
-          {formError && (
-            <View style={styles.formError} accessibilityRole="alert">
-              <Text style={styles.formErrorText}>{formError}</Text>
             </View>
-          )}
 
-          <View style={styles.actions}>
-            <Button label={submitLabel} onPress={() => void handleSubmit()} loading={submitting} />
-          </View>
+            {showForgotPassword && (
+              <Link href="/forgot-password" style={styles.forgotLink}>
+                Forgot your password?
+              </Link>
+            )}
 
-          <View style={styles.footer}>
-            <Text style={text.bodyMuted}>{footerText} </Text>
-            <Link href={footerHref} replace style={styles.footerLink}>
-              {footerLinkLabel}
-            </Link>
+            {formError && (
+              <View style={styles.formError} accessibilityRole="alert">
+                <Text style={styles.formErrorText}>{formError}</Text>
+              </View>
+            )}
+
+            <View style={styles.actions}>
+              <Button
+                label={submitLabel}
+                onPress={() => void handleSubmit()}
+                loading={submitting}
+              />
+            </View>
+
+            <View style={styles.footer}>
+              <Text style={text.bodyMuted}>{footerText} </Text>
+              <Link href={footerHref} replace style={styles.footerLink}>
+                {footerLinkLabel}
+              </Link>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -235,16 +245,20 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: space.xxl,
   },
+  // The hero bleeds to the screen edges, so the form below needs its own
+  // breathing room rather than inheriting the header's flush alignment.
+  body: { paddingTop: space.xl },
   subtitle: {
     marginTop: space.sm,
     marginBottom: space.xl,
+    lineHeight: 21,
   },
   fields: {
     gap: space.lg,
   },
   forgotLink: {
     ...text.label,
-    color: color.clay,
+    color: color.accent,
     marginTop: space.lg,
     // Aligned right, below the password field it relates to — the conventional
     // position, so people find it without reading.
@@ -254,9 +268,9 @@ const styles = StyleSheet.create({
     marginTop: space.lg,
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: color.inkWash,
+    backgroundColor: color.dangerTint,
     borderLeftWidth: 3,
-    borderLeftColor: color.clayDeep,
+    borderLeftColor: color.danger,
   },
   formErrorText: {
     ...text.body,
@@ -273,6 +287,6 @@ const styles = StyleSheet.create({
   },
   footerLink: {
     ...text.label,
-    color: color.clay,
+    color: color.accent,
   },
 });

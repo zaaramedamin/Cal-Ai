@@ -65,6 +65,15 @@ export default function SearchScreen() {
   // state: it is a static list, so refetching it on every keystroke-clear would
   // be pure waste.
   const [popular, setPopular] = useState<PopularFood[]>([]);
+  /**
+   * What to search with, when it differs from what the box shows.
+   *
+   * Tapping "Eggs" should search the term USDA files eggs under
+   * ("egg whole raw") while the box still reads "Eggs" — putting the lookup
+   * string in the field works but reads like a leaked implementation detail.
+   * Cleared the moment the user types, so their own words always win.
+   */
+  const [searchOverride, setSearchOverride] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +96,7 @@ export default function SearchScreen() {
   const latestQuery = useRef('');
 
   useEffect(() => {
-    const trimmed = query.trim();
+    const trimmed = (searchOverride ?? query).trim();
     latestQuery.current = trimmed;
 
     if (trimmed.length < MIN_QUERY_LENGTH) {
@@ -117,7 +126,7 @@ export default function SearchScreen() {
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, searchOverride]);
 
   return (
     <Screen>
@@ -137,7 +146,10 @@ export default function SearchScreen() {
       <TextField
         label="Search"
         value={query}
-        onChangeText={setQuery}
+        onChangeText={(next) => {
+          setSearchOverride(null);
+          setQuery(next);
+        }}
         placeholder="Chicken breast, oats, banana…"
         autoCapitalize="none"
         autoCorrect={false}
@@ -153,7 +165,10 @@ export default function SearchScreen() {
           // doing the work a thumbnail would in an app that could afford one.
           <PopularGrid
             foods={popular}
-            onPick={(food) => setQuery(food.search_term)}
+            onPick={(food) => {
+              setQuery(food.name);
+              setSearchOverride(food.search_term);
+            }}
           />
         ) : (
           <View style={styles.centered}>

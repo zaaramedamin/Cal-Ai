@@ -16,7 +16,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
@@ -40,6 +40,7 @@ import { ProgressRing } from '@/components/progress-ring';
 import { Screen } from '@/components/screen';
 import { WeekStrip } from '@/components/week-strip';
 import { Wordmark } from '@/components/wordmark';
+import { photo } from '@/theme/imagery';
 import { HIT_SLOP_MIN, color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
@@ -463,7 +464,12 @@ function Dashboard({
 
       {entries.length === 0 ? (
         <EnterUp index={4}>
-          <Card>
+          <Card style={styles.emptyCard}>
+            {/* Renders only when the photo exists; the card is designed to look
+                complete without it, so a fresh clone is never half-drawn. */}
+            {photo('emptyDiary') && (
+              <Image source={photo('emptyDiary')!} style={styles.emptyPhoto} resizeMode="cover" />
+            )}
             <Text style={text.label}>Nothing logged yet</Text>
             <Text style={[text.bodyMuted, styles.emptyBody]}>
               {quickAdd.length > 0
@@ -732,7 +738,15 @@ const styles = StyleSheet.create({
   entryKcalBlock: { alignItems: 'flex-end' },
   entryKcalUnit: { ...text.bodyMuted, fontSize: 11 },
 
-  emptyBody: { marginTop: space.xs, fontSize: 13 },
+  emptyCard: { alignItems: 'center' },
+  emptyPhoto: {
+    width: '100%',
+    height: 132,
+    borderRadius: radius.md,
+    marginBottom: space.md,
+    backgroundColor: color.wash,
+  },
+  emptyBody: { marginTop: space.xs, fontSize: 13, textAlign: 'center' },
   partialNote: { ...text.bodyMuted, fontSize: 12, marginTop: space.sm },
 
   scrim: {
