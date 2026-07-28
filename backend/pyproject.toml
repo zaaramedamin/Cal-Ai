@@ -38,6 +38,15 @@ dependencies = [
     # Async HTTP for the USDA proxy. Note this is httpx, not the httpx2 in dev
     # dependencies — that one exists solely as Starlette's test transport.
     "httpx>=0.28",
+    # --- MongoDB ---
+    # The official async driver. `motor` is the asyncio wrapper the MongoDB team
+    # maintain over pymongo, so it shares pymongo's BSON codecs and connection
+    # pooling rather than reimplementing them.
+    "motor>=3.6",
+    # Not a transitive-only dependency: we import ObjectId, IndexModel and the
+    # error types directly, and pinning it explicitly means a motor upgrade
+    # cannot silently move the version those come from.
+    "pymongo>=4.10",
 ]
 
 [project.optional-dependencies]

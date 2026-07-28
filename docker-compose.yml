@@ -37,6 +37,32 @@ services:
       retries: 10
       start_period: 10s
 
+  mongo:
+    image: mongo:7
+    container_name: calai-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-calai}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-calai_dev_password}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-calai}
+    ports:
+      # 127.0.0.1 for the same reason as Postgres: the phone talks to FastAPI,
+      # never to a database directly.
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
+    volumes:
+      - calai_mongodata:/data/db
+    healthcheck:
+      # `mongosh --eval` exits non-zero until the server accepts commands, which
+      # is what makes `depends_on: service_healthy` meaningful. Without it the
+      # API starts first and fails its first query, which reads as a code bug.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   calai_pgdata:
     name: calai_pgdata
+  calai_mongodata:
+    name: calai_mongodata

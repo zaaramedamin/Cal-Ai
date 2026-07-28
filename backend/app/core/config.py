@@ -46,6 +46,18 @@ class Settings(BaseSettings):
 
     database_url: str
 
+    # ---- MongoDB ----------------------------------------------------------
+    # Holds the food catalogue and, in time, everything else. Kept as a separate
+    # setting rather than derived from DATABASE_URL because the two databases
+    # will point at different hosts the moment this is deployed — a managed
+    # Postgres and a managed Mongo are never the same box.
+    #
+    # 127.0.0.1 rather than localhost for the reason documented on DATABASE_URL:
+    # localhost resolves to ::1 first and the container publishes IPv4 only, so
+    # every connection waits for the IPv6 attempt to time out.
+    mongodb_url: str = "mongodb://calai:calai_dev_password@127.0.0.1:27017/?authSource=admin"
+    mongodb_db: str = "calai"
+
     # ---- Auth -------------------------------------------------------------
     # Signs access tokens. Rotating it invalidates every issued token at once,
     # which is the intended panic button if one ever leaks.

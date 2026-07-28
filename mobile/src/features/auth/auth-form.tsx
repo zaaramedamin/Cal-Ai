@@ -247,7 +247,8 @@ const styles = StyleSheet.create({
   },
   // The hero bleeds to the screen edges, so the form below needs its own
   // breathing room rather than inheriting the header's flush alignment.
-  body: { paddingTop: space.xl },
+  // Clears the preview card that hangs out of the hero's bottom edge.
+  body: { paddingTop: 104 },
   subtitle: {
     marginTop: space.sm,
     marginBottom: space.xl,

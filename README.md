@@ -85,12 +85,32 @@ paste it in:
 GEMINI_API_KEY=AIza...
 ```
 
-### 3. Database
+### 3. Databases
 
 ```powershell
 docker compose up -d
-docker compose ps          # wait for "healthy"
+docker compose ps          # wait for both to read "healthy"
 ```
+
+Two containers: **Postgres** for users, the diary, recipes and weights, and
+**MongoDB** for the curated food catalogue and its photos. Both are bound to
+127.0.0.1 — the phone talks to FastAPI, never to a database.
+
+### 3b. Seed the food catalogue
+
+The catalogue is a hand-picked list of foods with real units (litres for milk,
+eggs by the egg) whose **numbers come from USDA**, fetched once and stored:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.cli seed-catalogue
+```
+
+**This needs a real `USDA_API_KEY`.** `DEMO_KEY` allows 30 requests an hour and
+the catalogue is longer than that, so seeding will stop partway with a message
+saying so. The seeder is resumable — run it again and it fills in what is
+missing — but a free key from
+<https://fdc.nal.usda.gov/api-key-signup.html> does it in one pass.
 
 ### 4. Backend
 

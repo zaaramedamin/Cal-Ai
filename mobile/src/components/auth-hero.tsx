@@ -1,118 +1,154 @@
 /**
  * The banner at the top of the sign-in and sign-up screens.
  *
- * A photograph when one exists, and a designed panel when one does not — not a
- * grey box waiting for art. The fallback is built from the same pieces as the
- * rest of the app (the accent, the macro hues, the chevron) so a fresh clone
- * with no photography still looks like a finished product rather than a
- * placeholder somebody forgot.
+ * **It shows the product, not a mood.** The first version was a gradient with a
+ * logo on it — the visual equivalent of saying nothing. This one puts a working
+ * calorie ring and real macro chips on a dark field, so the first thing someone
+ * sees is what the app actually does. Fintech and fitness apps converged on this
+ * for a reason: a preview of the interface answers "what is this" before the
+ * strapline gets a chance to.
  *
- * The gradient scrim is not decoration. White text over an uncontrolled
- * photograph is a coin toss — a bright kitchen worktop will swallow it. Fading
- * the image into the ink at the bottom guarantees the wordmark and the strapline
- * sit on something dark enough to read, whatever the picture turns out to be.
+ * Nothing here is a photograph, which makes it dependable — it looks the same on
+ * a fresh clone, needs no asset pipeline, adds no bytes, and cannot be undone by
+ * a picture that happens to be too bright behind white text.
+ *
+ * The numbers are illustrative and chosen to look like a real day rather than a
+ * round advertisement: 1,847 of a 2,200 target, with macros that actually sum to
+ * roughly that. A demo showing 2,000 / 2,000 reads as a mock-up.
  */
 
-import { Image, StyleSheet, Text, View } from 'react-native';
-import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { Wordmark } from '@/components/wordmark';
-import { photo } from '@/theme/imagery';
 import { color, radius, space } from '@/theme/tokens';
-import { text } from '@/theme/typography';
+import { fontFamily, text } from '@/theme/typography';
 
-export function AuthHero({ strapline, height = 232 }: { strapline: string; height?: number }) {
-  const source = photo('authHero');
+/** A plausible day, not a round number. See the module note. */
+const DEMO = { eaten: 1847, target: 2200, protein: 132, carbs: 198, fat: 61 };
+
+export function AuthHero({ strapline }: { strapline: string }) {
+  const progress = DEMO.eaten / DEMO.target;
 
   return (
-    <View style={[styles.wrap, { height }]}>
-      {source ? (
-        <Image source={source} style={StyleSheet.absoluteFill} resizeMode="cover" />
-      ) : (
-        <FallbackArt />
-      )}
-
-      {/* Sits above either background. Transparent at the top so a photograph
-          still reads as a photograph, opaque at the bottom where the type is. */}
-      <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+    <View style={styles.wrap}>
+      {/* A soft indigo bloom rather than a linear gradient. A top-to-bottom ramp
+          reads as a template; an off-centre glow gives the panel a light source
+          and lets the card below look like it is sitting in front of something. */}
+      <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 400 300">
         <Defs>
-          <LinearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={color.ink} stopOpacity="0.05" />
-            <Stop offset="0.55" stopColor={color.ink} stopOpacity="0.45" />
-            <Stop offset="1" stopColor={color.ink} stopOpacity="0.88" />
+          <LinearGradient id="bloom" x1="0.15" y1="0" x2="0.9" y2="1">
+            <Stop offset="0" stopColor={color.accent} stopOpacity="0.55" />
+            <Stop offset="0.55" stopColor={color.accentDeep} stopOpacity="0.22" />
+            <Stop offset="1" stopColor={color.ink} stopOpacity="0" />
           </LinearGradient>
         </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#scrim)" />
+        <Rect x="0" y="0" width="400" height="300" fill={color.ink} />
+        <Rect x="0" y="0" width="400" height="300" fill="url(#bloom)" />
       </Svg>
 
-      <View style={styles.copy}>
-        <Wordmark size={30} onDark />
+      <View style={styles.content}>
+        <Wordmark size={26} onDark />
         <Text style={styles.strapline}>{strapline}</Text>
+
+        {/* The preview card. Deliberately overlaps the panel's bottom edge so it
+            bridges the hero and the form, tying the two halves of the screen
+            together instead of stacking two unrelated blocks. */}
+        <View style={styles.card}>
+          <View style={styles.cardLeft}>
+            <Text style={styles.cardValue}>{(DEMO.target - DEMO.eaten).toLocaleString()}</Text>
+            <Text style={styles.cardLabel}>calories left</Text>
+            <View style={styles.chips}>
+              <Chip tint={color.protein} grams={DEMO.protein} />
+              <Chip tint={color.carbs} grams={DEMO.carbs} />
+              <Chip tint={color.fat} grams={DEMO.fat} />
+            </View>
+          </View>
+
+          {/* Drawn directly rather than reusing ProgressRing, because that
+              component animates on mount and this is furniture — a ring
+              sweeping every time the login screen mounts would draw the eye to
+              the wrong thing. */}
+          <Svg width={72} height={72} style={styles.ring}>
+            <Circle cx={36} cy={36} r={30} stroke={color.wash} strokeWidth={8} fill="none" />
+            <Circle
+              cx={36}
+              cy={36}
+              r={30}
+              stroke={color.accent}
+              strokeWidth={8}
+              fill="none"
+              strokeLinecap="round"
+              strokeDasharray={2 * Math.PI * 30}
+              strokeDashoffset={2 * Math.PI * 30 * (1 - progress)}
+            />
+          </Svg>
+          <Ionicons name="flame" size={20} color={color.accent} style={styles.ringIcon} />
+        </View>
       </View>
     </View>
   );
 }
 
-/**
- * The no-photograph state: the app's own mark on a deep indigo field, with the
- * three macro colours as a quiet band. Drawn rather than imported so it costs
- * nothing and cannot go missing.
- */
-function FallbackArt() {
+function Chip({ tint, grams }: { tint: string; grams: number }) {
   return (
-    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 400 240">
-      <Defs>
-        <LinearGradient id="field" x1="0" y1="0" x2="1" y2="1">
-          <Stop offset="0" stopColor={color.accentDeep} />
-          <Stop offset="1" stopColor={color.accent} />
-        </LinearGradient>
-      </Defs>
-      <Rect x="0" y="0" width="400" height="240" fill="url(#field)" />
-
-      {/* The chevron from the app icon, oversized and half off the edge, so it
-          reads as a graphic device rather than a logo stranded in a box. */}
-      <Path
-        d="M232,196 L300,96 L368,196"
-        stroke={color.onDark}
-        strokeOpacity="0.16"
-        strokeWidth="26"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-
-      {[
-        { x: 0, w: 150, fill: color.protein },
-        { x: 150, w: 130, fill: color.carbs },
-        { x: 280, w: 120, fill: color.fat },
-      ].map((band) => (
-        <Rect key={band.x} x={band.x} y={236} width={band.w} height={4} fill={band.fill} />
-      ))}
-    </Svg>
+    <View style={styles.chip}>
+      <View style={[styles.chipDot, { backgroundColor: tint }]} />
+      <Text style={styles.chipText}>{grams}g</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
-    // Bleeds past the screen's horizontal padding to touch both edges, which is
-    // what makes it read as a header rather than a card that happens to be big.
-    // Must match `Screen`'s own padding exactly — `space.xl` horizontally and
-    // the `space.lg` it adds below the safe-area inset — or the bleed leaves a
+    // Must match `Screen`'s own padding — `space.xl` horizontally, and the
+    // `space.lg` it adds below the safe-area inset — or the bleed leaves a
     // hairline of canvas down one side.
     marginHorizontal: -space.xl,
     marginTop: -space.lg,
+    paddingTop: space.xxl,
+    // Room for the card to hang past the bottom edge.
+    paddingBottom: 54,
     borderBottomLeftRadius: radius.xl,
     borderBottomRightRadius: radius.xl,
-    overflow: 'hidden',
-    justifyContent: 'flex-end',
-    backgroundColor: color.accentDeep,
+    backgroundColor: color.ink,
   },
-  copy: { padding: space.xl, gap: space.xs },
+  content: { paddingHorizontal: space.xl, gap: space.sm },
   strapline: {
     ...text.body,
-    color: 'rgba(255, 255, 255, 0.88)',
-    fontSize: 15,
-    lineHeight: 21,
-    maxWidth: 280,
+    color: 'rgba(255, 255, 255, 0.72)',
+    fontSize: 14,
+    lineHeight: 20,
+    maxWidth: 270,
+    marginBottom: space.lg,
   },
+
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: color.surface,
+    borderRadius: radius.lg,
+    padding: space.lg,
+    // Hangs below the panel, overlapping into the form area.
+    marginBottom: -84,
+  },
+  cardLeft: { gap: 2 },
+  cardValue: {
+    fontFamily: fontFamily.extraBold,
+    fontSize: 34,
+    letterSpacing: -1,
+    color: color.ink,
+  },
+  cardLabel: { ...text.bodyMuted, fontSize: 12 },
+  chips: { flexDirection: 'row', gap: space.md, marginTop: space.sm },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  chipDot: { width: 7, height: 7, borderRadius: radius.pill },
+  chipText: { ...text.numeric, fontSize: 12, color: color.inkMuted },
+
+  ring: { transform: [{ rotate: '-90deg' }] },
+  // Centred over the ring by hand: the ring is rotated, so a child of it would
+  // be rotated too.
+  ringIcon: { position: 'absolute', right: space.lg + 26, top: '50%', marginTop: -10 },
 });
