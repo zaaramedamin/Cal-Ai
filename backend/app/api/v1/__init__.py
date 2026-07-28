@@ -10,9 +10,11 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     auth,
+    catalogue,
     diary,
     foods,
     health,
+    meals,
     profile,
     progress,
     recipes,
@@ -27,6 +29,8 @@ api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(profile.router)
 api_router.include_router(foods.router)
+api_router.include_router(catalogue.router)
+api_router.include_router(meals.router)
 api_router.include_router(diary.router)
 api_router.include_router(recipes.router)
 api_router.include_router(progress.router)

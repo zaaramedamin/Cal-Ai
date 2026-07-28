@@ -28,9 +28,20 @@ class Seed(NamedTuple):
     unit: UnitKind
     #: Searched against USDA to find the row whose numbers this food adopts.
     query: str
-    #: What one item weighs, for COUNT foods.
+    #: What one of this food's units weighs. One item for COUNT, one millilitre
+    #: (i.e. the density) for MILLILITRES. Left null for GRAMS, where it is 1 by
+    #: definition and writing it out on twenty entries would be noise.
+    #:
+    #: For liquids this must agree with the density passed to `ml()` below;
+    #: `test_catalogue_seed` asserts it on every portion, because a density that
+    #: drifts out of step with its portions produces numbers that look entirely
+    #: reasonable and are quietly wrong on every log of that food.
     grams_per_unit: float | None = None
     portions: tuple[Portion, ...] = ()
+
+    @property
+    def resolved_grams_per_unit(self) -> float:
+        return 1.0 if self.grams_per_unit is None else self.grams_per_unit
 
 
 def g(label_en: str, label_fr: str, grams: float, *, default: bool = False) -> Portion:
@@ -407,6 +418,7 @@ SEEDS: tuple[Seed, ...] = (
         "🥛",
         UnitKind.MILLILITRES,
         "milk whole 3.25% milkfat",
+        grams_per_unit=1.03,
         portions=(
             ml("1 glass", "1 verre", 250, 1.03, default=True),
             ml("1 large glass", "1 grand verre", 350, 1.03),
@@ -451,6 +463,7 @@ SEEDS: tuple[Seed, ...] = (
         "🧃",
         UnitKind.MILLILITRES,
         "orange juice raw",
+        grams_per_unit=1.04,
         portions=(
             ml("1 glass", "1 verre", 250, 1.04, default=True),
             ml("1 litre", "1 litre", 1000, 1.04),
@@ -475,6 +488,7 @@ SEEDS: tuple[Seed, ...] = (
         "🫒",
         UnitKind.MILLILITRES,
         "oil olive salad or cooking",
+        grams_per_unit=0.91,
         portions=(
             ml("1 tsp", "1 c. à café", 5, 0.91, default=True),
             ml("1 tbsp", "1 c. à soupe", 15, 0.91),
@@ -556,7 +570,7 @@ async def seed_catalogue(
             category=seed.category,
             emoji=seed.emoji,
             unit=seed.unit,
-            grams_per_unit=seed.grams_per_unit,
+            grams_per_unit=seed.resolved_grams_per_unit,
             kcal=normalised["kcal"],
             protein_g=normalised["protein_g"],
             carbs_g=normalised["carbs_g"],

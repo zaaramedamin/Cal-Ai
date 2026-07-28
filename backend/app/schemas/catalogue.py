@@ -73,9 +73,16 @@ class CatalogueFood(BaseModel):
     photo: str | None = None
 
     unit: UnitKind
-    #: For COUNT foods, what one item weighs. Null for grams and millilitres,
-    #: where the portion list carries the conversion instead.
-    grams_per_unit: float | None = None
+    #: What **one** of this food's units weighs in grams — one egg, one
+    #: millilitre, one gram. Present for every food, not only countables.
+    #:
+    #: This started as "null except for COUNT, the portions carry the rest" and
+    #: was wrong. The portion list only covers the sizes we thought to offer, so
+    #: a user typing 300 ml of milk when no 300 ml portion exists left the server
+    #: with no way to convert — and the tempting fix, assuming water, is a 3%
+    #: error on milk and a 9% one on oil. One number per food, used by every
+    #: conversion, means there is nowhere for that assumption to hide.
+    grams_per_unit: float = Field(gt=0)
 
     # --- per 100 g, always, whatever the display unit ---------------------
     # Kept per 100 g even for liquids and countables so every number in the
@@ -100,3 +107,28 @@ class CatalogueFood(BaseModel):
     #: Sort order within a category, so the list reads deliberately rather than
     #: alphabetically.
     order: int = 0
+
+
+class CatalogueSection(BaseModel):
+    """One category's worth of foods, ready to render as a section."""
+
+    category: str
+    foods: list[CatalogueFood]
+
+
+class CatalogueResponse(BaseModel):
+    """The whole catalogue, in one response.
+
+    Deliberately unpaginated. Thirty-five foods is roughly 20 KB of JSON — less
+    than a single photo — and paginating it would mean more code here, more
+    state on the client, and a browse screen that stutters as the user scrolls
+    through a list short enough to fit in memory twice over. If the catalogue
+    ever grows past a few hundred foods this becomes the wrong call, and the
+    section shape below is what a `?category=` filter would slot into.
+
+    Both languages travel together rather than the server picking one, so
+    switching language in Settings re-renders instantly instead of refetching.
+    """
+
+    sections: list[CatalogueSection]
+    total: int

@@ -25,6 +25,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -36,9 +37,14 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 from app.core.rate_limit import reset_all
+from app.db.mongo import FOOD_ITEMS, MEALS, close_client
+from app.schemas.catalogue import CatalogueFood, Portion, UnitKind
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 TEST_DB_NAME = "calai_test"
+#: Same reasoning as the Postgres test database, and the same name for symmetry.
+#: Mongo creates a database on first write, so nothing has to pre-create this.
+TEST_MONGO_DB = "calai_test"
 
 
 def _swap_database(url: str, database: str) -> str:
@@ -80,6 +86,8 @@ def _prepare_database() -> Iterator[None]:
     # be cleared because Settings is lru_cached and Alembic's env.py calls it.
     previous = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+    previous_mongo = os.environ.get("MONGODB_DB")
+    os.environ["MONGODB_DB"] = TEST_MONGO_DB
 
     # Rate limiting off by default. The auth tests make dozens of deliberate
     # failed logins, which would otherwise trip the limiter and fail assertions
@@ -98,6 +106,10 @@ def _prepare_database() -> Iterator[None]:
         os.environ.pop("DATABASE_URL", None)
     else:
         os.environ["DATABASE_URL"] = previous
+    if previous_mongo is None:
+        os.environ.pop("MONGODB_DB", None)
+    else:
+        os.environ["MONGODB_DB"] = previous_mongo
     get_settings.cache_clear()
 
 
@@ -137,6 +149,108 @@ async def _clean_tables(engine) -> AsyncGenerator[None]:
                 "RESTART IDENTITY CASCADE"
             )
         )
+
+
+@pytest.fixture
+async def mongo() -> AsyncGenerator[AsyncIOMotorDatabase]:
+    """A Mongo handle for seeding and asserting, on *this test's* event loop.
+
+    Deliberately a separate client from the one the app uses, for a reason that
+    is easy to get wrong. A motor client binds to the event loop it was created
+    on, and `TestClient` runs the app in its own thread with its own loop — so a
+    test that seeded through the app's cached client and then awaited it directly
+    would be using one loop's client from another, which fails with an error that
+    looks like a database problem and is not.
+
+    Two clients against the same real database sidesteps it entirely: this one is
+    a test tool, the app's is the app's, and neither ever sees the other's loop.
+    Same shape as the `engine` fixture, and the same reason.
+    """
+    client = AsyncIOMotorClient(get_settings().mongodb_url, uuidRepresentation="standard")
+    yield client[TEST_MONGO_DB]
+    client.close()
+
+
+@pytest.fixture(autouse=True)
+async def _clean_mongo(mongo) -> AsyncGenerator[None]:
+    """Empty the Mongo collections between tests, and drop the app's client.
+
+    Closing the app's client is the Mongo equivalent of `NullPool`: it forces the
+    next test to build a fresh one on its own loop rather than inheriting a
+    client bound to a loop that has since closed.
+    """
+    yield
+    for name in (FOOD_ITEMS, MEALS):
+        await mongo[name].delete_many({})
+    await close_client()
+
+
+@pytest.fixture
+async def catalogue(mongo) -> list[dict]:
+    """Two seeded catalogue foods, covering both interesting unit kinds.
+
+    Numbers are USDA's, recorded from a real response — an egg is 143 kcal per
+    100 g and milk is 61. Written out rather than fetched so the suite neither
+    needs the network nor spends the shared USDA budget, and so a test that
+    depends on an exact total cannot start failing because upstream revised a
+    value.
+    """
+    docs = [
+        CatalogueFood(
+            slug="egg",
+            name_en="Egg",
+            name_fr="Œuf",
+            category="Protein",
+            emoji="🥚",
+            unit=UnitKind.COUNT,
+            grams_per_unit=50,
+            kcal=143,
+            protein_g=12.6,
+            carbs_g=0.72,
+            fat_g=9.51,
+            fibre_g=0,
+            source_id="748967",
+            portions=[
+                Portion(label_en="1 egg", label_fr="1 œuf", amount=1, grams=50),
+                Portion(
+                    label_en="2 eggs", label_fr="2 œufs", amount=2, grams=100, is_default=True
+                ),
+            ],
+            order=0,
+        ),
+        CatalogueFood(
+            slug="milk",
+            name_en="Milk",
+            name_fr="Lait",
+            category="Dairy",
+            emoji="🥛",
+            unit=UnitKind.MILLILITRES,
+            # Milk is denser than water. This is the number the whole unit model
+            # exists to keep honest.
+            grams_per_unit=1.03,
+            kcal=61,
+            protein_g=3.15,
+            carbs_g=4.8,
+            fat_g=3.25,
+            # Deliberately absent, so tests can prove a gap stays a gap rather
+            # than becoming a confident zero on the way through a sum.
+            fibre_g=None,
+            source_id="746782",
+            portions=[
+                Portion(
+                    label_en="1 glass",
+                    label_fr="1 verre",
+                    amount=250,
+                    grams=257.5,
+                    is_default=True,
+                ),
+            ],
+            order=1,
+        ),
+    ]
+    payload = [doc.model_dump(mode="json") for doc in docs]
+    await mongo[FOOD_ITEMS].insert_many(payload)
+    return payload
 
 
 @pytest.fixture

@@ -15,11 +15,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pymongo.errors import PyMongoError
 from sqlalchemy.exc import DBAPIError
 
 from app import __version__
 from app.api.v1 import api_router
 from app.core.config import get_settings
+from app.db.mongo import close_client, ensure_indexes
 from app.db.session import engine
 
 logger = logging.getLogger(__name__)
@@ -29,15 +31,30 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI):
     """Startup and shutdown.
 
-    Nothing to do on startup: the engine connects lazily, so eagerly opening a
-    pool here would only mean the API refuses to boot when Postgres happens to be
-    down — exactly the situation the health endpoint exists to report on.
+    Postgres is left alone on startup: the engine connects lazily, so eagerly
+    opening a pool here would only mean the API refuses to boot when Postgres
+    happens to be down — exactly the situation the health endpoint exists to
+    report on.
 
-    On shutdown we dispose the pool so connections are closed cleanly instead of
-    being left for Postgres to time out.
+    Mongo needs one piece of eager work, because it has no migrations: its
+    indexes have to be created *somewhere*, and doing it here means a fresh clone
+    gets a correct database from `docker compose up` with no separate setup step
+    to forget. It is idempotent and costs a few milliseconds.
+
+    A failure is logged and swallowed, on the same principle as Postgres. Half
+    this app — auth, the diary, progress — does not touch Mongo at all, and
+    refusing to serve any of it because an index could not be created would turn
+    a degraded dependency into a total outage.
     """
+    try:
+        await ensure_indexes()
+    except PyMongoError as exc:
+        logger.warning("Could not create MongoDB indexes at startup: %s", exc)
+
     yield
+
     await engine.dispose()
+    await close_client()
 
 
 def create_app() -> FastAPI:
@@ -114,6 +131,32 @@ def create_app() -> FastAPI:
                 "detail": (
                     "The database isn't reachable. If you're running locally, start it with "
                     "`docker compose up -d` and try again."
+                )
+            },
+        )
+
+    @app.exception_handler(PyMongoError)
+    async def _mongo_unreachable(request: Request, exc: Exception) -> JSONResponse:
+        """The same courtesy for the other database.
+
+        Mongo fails differently from Postgres and would otherwise produce the
+        same useless plain-text 500: the driver waits out its five-second server
+        selection timeout and raises, the client cannot parse the body, and the
+        user gets "something went wrong on the server" while the one machine that
+        knows the answer says nothing.
+
+        Catching `PyMongoError` broadly is deliberate here, unlike the narrow
+        `DBAPIError` above. There is no equivalent of a "bad query" mistake to
+        confuse it with: nothing in this codebase builds Mongo queries from user
+        input, so in practice every error reaching this point is the connection.
+        """
+        logger.error("MongoDB unreachable on %s %s: %s", request.method, request.url.path, exc)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "detail": (
+                    "The food catalogue database isn't reachable. If you're running "
+                    "locally, start it with `docker compose up -d` and try again."
                 )
             },
         )

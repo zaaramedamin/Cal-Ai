@@ -44,6 +44,50 @@ def test_countable_foods_declare_what_one_item_weighs() -> None:
             assert seed.grams_per_unit, f"{seed.slug} is counted but has no grams_per_unit"
 
 
+def test_every_food_declares_what_one_of_its_units_weighs() -> None:
+    """Grams per unit is what makes an *arbitrary* amount convertible.
+
+    The portion list only covers the sizes we thought to offer. A user typing
+    300 ml when the list has 250 and 1000 still needs a correct weight, and the
+    tempting fallback — assume water — is the exact error the density exists to
+    prevent.
+    """
+    for seed in SEEDS:
+        assert seed.resolved_grams_per_unit > 0, f"{seed.slug} cannot be converted"
+
+
+def test_liquid_densities_agree_with_their_own_portions() -> None:
+    """The one place these numbers can drift apart.
+
+    Density is written twice for a liquid — once on the seed, once per `ml()`
+    call — so an edit to one can silently leave the other behind. The failure is
+    invisible: a glass of milk logged from the portion list would weigh 257.5 g
+    while the same 250 ml typed by hand weighed 250 g, and both look fine.
+    """
+    for seed in SEEDS:
+        if seed.unit is not UnitKind.MILLILITRES:
+            continue
+        for portion in seed.portions:
+            expected = round(portion.amount * seed.resolved_grams_per_unit, 1)
+            assert portion.grams == pytest.approx(expected, abs=0.05), (
+                f"{seed.slug}: portion {portion.label_en!r} is {portion.grams} g but "
+                f"density {seed.resolved_grams_per_unit} implies {expected} g"
+            )
+
+
+def test_countable_portions_agree_with_their_item_weight() -> None:
+    """The same drift check for countables: "2 eggs" must be twice one egg."""
+    for seed in SEEDS:
+        if seed.unit is not UnitKind.COUNT:
+            continue
+        for portion in seed.portions:
+            expected = round(portion.amount * seed.resolved_grams_per_unit, 1)
+            assert portion.grams == pytest.approx(expected, abs=0.05), (
+                f"{seed.slug}: portion {portion.label_en!r} is {portion.grams} g but "
+                f"{seed.resolved_grams_per_unit} g per item implies {expected} g"
+            )
+
+
 def test_bilingual_labels_everywhere() -> None:
     """A missing French label would fall back to English mid-list, which reads
     worse than no translation at all."""
