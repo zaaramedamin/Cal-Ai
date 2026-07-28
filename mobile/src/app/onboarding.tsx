@@ -34,6 +34,7 @@ import { AchievementCurve, ChoiceCard, FunnelHeader, FunnelStep } from '@/compon
 import { RulerPicker } from '@/components/ruler-picker';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { buildPaceOptions } from '@/features/onboarding/pace';
 import {
   HEIGHT_RANGE,
   type HeightUnit,
@@ -84,9 +85,12 @@ const GOAL_OPTIONS: {
   { value: 'bulk', label: 'Bulk', description: '15% above maintenance', icon: 'barbell' },
 ];
 
-/** Steps in order. `target` is skipped when the goal is maintenance. */
-const STEPS = ['sex', 'birth', 'body', 'activity', 'goal', 'target', 'ready'] as const;
+/** Steps in order. `target` and `pace` are skipped when the goal is maintenance. */
+const STEPS = ['sex', 'birth', 'body', 'activity', 'goal', 'target', 'pace', 'ready'] as const;
 type Step = (typeof STEPS)[number];
+
+/** Steps that only make sense when the weight is meant to move. */
+const DIRECTIONAL_STEPS = new Set<Step>(['target', 'pace']);
 
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -101,6 +105,7 @@ export default function OnboardingScreen() {
   const [targetKg, setTargetKg] = useState(65);
   const [activity, setActivity] = useState<ActivityLevel | null>(null);
   const [goal, setGoal] = useState<Goal | null>(null);
+  const [weeklyRateKg, setWeeklyRateKg] = useState<number | null>(null);
 
   const [heightUnit, setHeightUnit] = useState<HeightUnit>('cm');
   const [weightUnit, setWeightUnit] = useState<WeightUnit>('kg');
@@ -111,7 +116,10 @@ export default function OnboardingScreen() {
   // Maintenance has no target weight, so that step is removed from the sequence
   // rather than shown and skipped — otherwise the progress bar jumps.
   const steps = useMemo(
-    () => STEPS.filter((step) => step !== 'target' || (goal !== null && goal !== 'maintain')),
+    () =>
+      STEPS.filter(
+        (step) => !DIRECTIONAL_STEPS.has(step) || (goal !== null && goal !== 'maintain'),
+      ),
     [goal],
   );
   const step: Step = steps[Math.min(stepIndex, steps.length - 1)];
@@ -136,6 +144,7 @@ export default function OnboardingScreen() {
     activity: activity !== null,
     goal: goal !== null,
     target: targetKg > 0,
+    pace: weeklyRateKg !== null,
     ready: true,
   };
 
@@ -159,6 +168,10 @@ export default function OnboardingScreen() {
         activity_level: activity,
         goal,
         target_weight_kg: goal === 'maintain' ? null : targetKg,
+        // Null for maintenance, where a pace is incoherent — the server treats
+        // it as zero for that goal anyway, but sending a number we skipped
+        // asking about would be inventing an answer on the user's behalf.
+        weekly_rate_kg: goal === 'maintain' ? null : weeklyRateKg,
         timezone: deviceTimezone(),
       });
       // The plan screen reads the saved profile back, so the numbers it shows
@@ -346,6 +359,10 @@ export default function OnboardingScreen() {
                       ? Math.max(WEIGHT_RANGE.kg.min, Math.round(weightKg * 0.9))
                       : Math.round(weightKg * 1.08),
                   );
+                  // Open the pace picker on the sensible default for this goal,
+                  // matching DEFAULT_WEEKLY_RATE_KG on the server. Lean bulk is
+                  // slower on purpose: past ~0.25 kg a week the extra is fat.
+                  setWeeklyRateKg(option.value === 'lean_bulk' ? 0.25 : 0.5);
                 }}
               />
             ))}
@@ -375,6 +392,32 @@ export default function OnboardingScreen() {
                 reference={{ value: kgToLbs(weightKg), label: 'Now' }}
               />
             )}
+          </FunnelStep>
+        )}
+
+        {step === 'pace' && (
+          <FunnelStep
+            title="How fast do you want to get there?"
+            subtitle="This is what actually sets your daily calories. Slower is easier to keep up, and keeping it up is the whole thing."
+            footnote={FOOTNOTE}
+          >
+            {buildPaceOptions(weightKg, goal === 'maintain' ? null : targetKg).map((option) => (
+              <ChoiceCard
+                key={option.rateKg}
+                label={option.label}
+                description={
+                  `${goal === 'cut' ? '−' : '+'}${option.dailyKcal} kcal a day` +
+                  (option.weeks !== null ? ` · about ${option.weeks} weeks` : '') +
+                  (option.aggressive ? ' · faster than 1% of your bodyweight' : '')
+                }
+                selected={weeklyRateKg === option.rateKg}
+                onPress={() => setWeeklyRateKg(option.rateKg)}
+              />
+            ))}
+            <Text style={styles.illustrative}>
+              Projections assume a steady pace and about 7,700 kcal per kilogram. Real bodies are
+              less tidy — treat the scale over a few weeks as the real answer.
+            </Text>
           </FunnelStep>
         )}
 

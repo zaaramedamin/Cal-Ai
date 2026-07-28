@@ -11,12 +11,14 @@ import pytest
 
 from app.nutrition.targets import (
     ACTIVITY_MULTIPLIERS,
+    DEFAULT_WEEKLY_RATE_KG,
     GOAL_MULTIPLIERS,
     KCAL_PER_GRAM_CARBS,
     KCAL_PER_GRAM_FAT,
     KCAL_PER_GRAM_PROTEIN,
     MAX_AGE_YEARS,
     MAX_HEIGHT_CM,
+    MAX_WEEKLY_RATE_KG,
     MAX_WEIGHT_KG,
     MIN_AGE_YEARS,
     MIN_CALORIES_FEMALE,
@@ -473,3 +475,188 @@ def test_results_are_immutable() -> None:
     result = calculate_targets(**REFERENCE)
     with pytest.raises(AttributeError):
         result.calories = 9999  # type: ignore[misc]
+
+
+# --------------------------------------------------------------------------- #
+# Rate of change (item 8: the user picks how fast)
+# --------------------------------------------------------------------------- #
+
+
+def test_rate_produces_the_deficit_the_arithmetic_implies() -> None:
+    """0.5 kg a week is 7700/2 kcal over seven days = 550 kcal a day."""
+    steady = calculate_targets(
+        sex=Sex.MALE,
+        age_years=30,
+        height_cm=180,
+        weight_kg=80,
+        activity_level=ActivityLevel.MODERATE,
+        goal=Goal.MAINTAIN,
+        weekly_rate_kg=0,
+    )
+    cutting = calculate_targets(
+        sex=Sex.MALE,
+        age_years=30,
+        height_cm=180,
+        weight_kg=80,
+        activity_level=ActivityLevel.MODERATE,
+        goal=Goal.CUT,
+        weekly_rate_kg=0.5,
+    )
+
+    assert steady.calories == steady.tdee
+    assert steady.tdee - cutting.uncapped_calories == pytest.approx(550, abs=1)
+
+
+def test_direction_comes_from_the_goal_not_the_sign() -> None:
+    """The user picks "how fast", never "which way" — a negative rate would be a
+    second, contradictory source of truth about direction."""
+    common = dict(
+        sex=Sex.MALE,
+        age_years=30,
+        height_cm=180,
+        weight_kg=80,
+        activity_level=ActivityLevel.MODERATE,
+        weekly_rate_kg=0.5,
+    )
+    cutting = calculate_targets(goal=Goal.CUT, **common)
+    bulking = calculate_targets(goal=Goal.BULK, **common)
+
+    assert cutting.uncapped_calories < cutting.tdee < bulking.uncapped_calories
+    # Symmetrical about maintenance: same rate, opposite directions.
+    assert (cutting.tdee - cutting.uncapped_calories) == pytest.approx(
+        bulking.uncapped_calories - bulking.tdee, abs=1
+    )
+
+
+def test_a_negative_rate_is_rejected() -> None:
+    with pytest.raises(InvalidBodyStats, match="cannot be negative"):
+        calculate_targets(
+            sex=Sex.MALE,
+            age_years=30,
+            height_cm=180,
+            weight_kg=80,
+            activity_level=ActivityLevel.MODERATE,
+            goal=Goal.CUT,
+            weekly_rate_kg=-0.5,
+        )
+
+
+def test_an_absurd_rate_is_refused_rather_than_planned_for() -> None:
+    """The arithmetic keeps working past this point; the answer stops being
+    something an app should hand someone."""
+    with pytest.raises(InvalidBodyStats, match="beyond the"):
+        calculate_targets(
+            sex=Sex.MALE,
+            age_years=30,
+            height_cm=180,
+            weight_kg=80,
+            activity_level=ActivityLevel.MODERATE,
+            goal=Goal.CUT,
+            weekly_rate_kg=3.0,
+        )
+
+
+def test_an_aggressive_rate_still_hits_the_safety_floor() -> None:
+    """The rate model must not become a way around the clamp that the
+    percentage model was subject to."""
+    result = calculate_targets(
+        sex=Sex.FEMALE,
+        age_years=30,
+        height_cm=160,
+        weight_kg=55,
+        activity_level=ActivityLevel.SEDENTARY,
+        goal=Goal.CUT,
+        weekly_rate_kg=1.5,
+    )
+
+    assert result.was_clamped
+    assert result.calories >= MIN_CALORIES_FEMALE
+    assert result.warnings
+
+
+def test_omitting_the_rate_keeps_the_old_multiplier_behaviour() -> None:
+    """Profiles saved before the picker existed must not have their targets move.
+
+    This is the whole reason the column is nullable rather than backfilled.
+    """
+    common = dict(
+        sex=Sex.MALE,
+        age_years=30,
+        height_cm=180,
+        weight_kg=80,
+        activity_level=ActivityLevel.MODERATE,
+        goal=Goal.CUT,
+    )
+
+    assert calculate_targets(**common).calories == round(
+        calculate_targets(**common).tdee * GOAL_MULTIPLIERS[Goal.CUT]
+    )
+
+
+def test_the_derivation_explains_the_rate_rather_than_a_multiplier() -> None:
+    """The derivation must describe the calculation that actually ran."""
+    result = calculate_targets(
+        sex=Sex.MALE,
+        age_years=30,
+        height_cm=180,
+        weight_kg=80,
+        activity_level=ActivityLevel.MODERATE,
+        goal=Goal.CUT,
+        weekly_rate_kg=0.75,
+    )
+
+    labels = [step.label for step in result.derivation]
+    assert "0.75 kg per week" in labels
+    assert not any("x 0.80" in step.detail for step in result.derivation)
+
+
+def test_rate_scales_with_the_person_where_a_percentage_does_not() -> None:
+    """The reason the rate model is better.
+
+    A 20% deficit is a much larger absolute cut for a big person than a small
+    one, though both tapped the same button. A rate means the same thing to both.
+    """
+    small = calculate_targets(
+        sex=Sex.FEMALE,
+        age_years=30,
+        height_cm=155,
+        weight_kg=50,
+        activity_level=ActivityLevel.LIGHT,
+        goal=Goal.CUT,
+        weekly_rate_kg=0.5,
+    )
+    large = calculate_targets(
+        sex=Sex.MALE,
+        age_years=30,
+        height_cm=195,
+        weight_kg=110,
+        activity_level=ActivityLevel.LIGHT,
+        goal=Goal.CUT,
+        weekly_rate_kg=0.5,
+    )
+
+    assert (small.tdee - small.uncapped_calories) == pytest.approx(
+        large.tdee - large.uncapped_calories, abs=1
+    )
+
+
+def test_maintain_ignores_any_rate_it_is_given() -> None:
+    """"Maintain, at 0.5 kg a week" is incoherent; the goal wins."""
+    result = calculate_targets(
+        sex=Sex.MALE,
+        age_years=30,
+        height_cm=180,
+        weight_kg=80,
+        activity_level=ActivityLevel.MODERATE,
+        goal=Goal.MAINTAIN,
+        weekly_rate_kg=0.5,
+    )
+
+    assert result.calories == result.tdee
+
+
+def test_every_goal_has_a_default_rate() -> None:
+    """Onboarding needs somewhere to open the picker for each goal."""
+    for goal in Goal:
+        assert goal in DEFAULT_WEEKLY_RATE_KG
+        assert 0 <= DEFAULT_WEEKLY_RATE_KG[goal] <= MAX_WEEKLY_RATE_KG

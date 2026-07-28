@@ -15,6 +15,7 @@ from app.core.deps import CurrentUser
 from app.db.models.profile import UserProfile, WeightEntry
 from app.db.session import get_session
 from app.nutrition.targets import (
+    DEFAULT_WEEKLY_RATE_KG,
     ActivityLevel,
     Goal,
     InvalidBodyStats,
@@ -79,6 +80,11 @@ def _targets_for(profile: UserProfile, weight_kg: float) -> TargetsRead:
             weight_kg=weight_kg,
             activity_level=ActivityLevel(profile.activity_level),
             goal=Goal(profile.goal),
+            # None means this profile predates the rate picker, and the older
+            # percentage multipliers apply. Not a default — a deliberate branch.
+            weekly_rate_kg=(
+                None if profile.weekly_rate_kg is None else float(profile.weekly_rate_kg)
+            ),
         )
     except InvalidBodyStats as exc:
         # Reachable if a profile was stored before a rule tightened, or if a user
@@ -136,6 +142,14 @@ async def upsert_profile(
     profile.activity_level = payload.activity_level.value
     profile.goal = payload.goal.value
     profile.target_weight_kg = payload.target_weight_kg
+    # Falls back to the goal's default rather than staying null, so a profile
+    # saved through the current app always plans by rate. The null branch exists
+    # only for rows written before this field did.
+    profile.weekly_rate_kg = (
+        DEFAULT_WEEKLY_RATE_KG[payload.goal]
+        if payload.weekly_rate_kg is None
+        else payload.weekly_rate_kg
+    )
     profile.timezone = payload.timezone
     if profile.onboarding_completed_at is None:
         profile.onboarding_completed_at = datetime.now(UTC)

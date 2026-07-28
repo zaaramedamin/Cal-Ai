@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.nutrition.targets import (
     MAX_HEIGHT_CM,
+    MAX_WEEKLY_RATE_KG,
     MAX_WEIGHT_KG,
     MIN_HEIGHT_CM,
     MIN_WEIGHT_KG,
@@ -31,6 +32,10 @@ class ProfileInput(BaseModel):
     activity_level: ActivityLevel
     goal: Goal
     target_weight_kg: float | None = Field(default=None, ge=MIN_WEIGHT_KG, le=MAX_WEIGHT_KG)
+    #: How fast to move, in kg per week, always positive — the goal decides the
+    #: direction. Absent means "use the sensible default for this goal", which is
+    #: what an older client that does not know about the picker will send.
+    weekly_rate_kg: float | None = Field(default=None, ge=0, le=MAX_WEEKLY_RATE_KG)
     #: IANA name. Sent once by the device, then used server-side to decide which
     #: local day a diary entry belongs to.
     timezone: str = Field(default="UTC", max_length=64)
@@ -88,6 +93,9 @@ class ProfileRead(BaseModel):
     activity_level: ActivityLevel
     goal: Goal
     target_weight_kg: float | None
+    #: Null only for profiles saved before the picker existed; those are planned
+    #: with the older percentage multipliers.
+    weekly_rate_kg: float | None
     timezone: str
     onboarding_completed_at: datetime | None
 

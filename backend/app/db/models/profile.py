@@ -45,6 +45,15 @@ class UserProfile(TimestampedCreation, Base):
 
     target_weight_kg: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
 
+    #: How fast the user chose to move, in kg per week. Always positive — the
+    #: goal supplies the direction.
+    #:
+    #: Nullable, and the null means something: "this profile predates the rate
+    #: picker, so use the old fixed-percentage multipliers". Backfilling it with
+    #: a default would silently change the calorie target of every existing user,
+    #: which is not a thing to do to someone tracking a diet.
+    weekly_rate_kg: Mapped[float | None] = mapped_column(Numeric(4, 2), nullable=True)
+
     # IANA name, e.g. "Europe/Paris". Needed from Phase 4 to decide which day a
     # diary entry belongs to. Stored on the profile rather than derived from the
     # request, because the client is not to be trusted with the date.

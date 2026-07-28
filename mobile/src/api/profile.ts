@@ -41,6 +41,9 @@ export interface Profile {
   activity_level: ActivityLevel;
   goal: Goal;
   target_weight_kg: number | null;
+  /** kg per week, always positive — the goal supplies the direction.
+      Null only for profiles saved before the pace picker existed. */
+  weekly_rate_kg: number | null;
   timezone: string;
   onboarding_completed_at: string | null;
 }
@@ -59,6 +62,8 @@ export interface ProfileInput {
   activity_level: ActivityLevel;
   goal: Goal;
   target_weight_kg?: number | null;
+  /** Omitted or null means "use the default pace for this goal". */
+  weekly_rate_kg?: number | null;
   timezone: string;
 }
 

@@ -224,3 +224,121 @@ def test_weight_requires_a_profile(client: TestClient) -> None:
         "/api/v1/profile/weight", json={"weight_kg": 79}, headers=auth_headers(client)
     )
     assert response.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Rate of weight change (item 8)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_chosen_pace_sets_the_calorie_target(client: TestClient) -> None:
+    """0.25 kg a week and 1.0 kg a week must not produce the same plan."""
+    headers = auth_headers(client)
+
+    gentle = client.put(
+        "/api/v1/profile",
+        json={**VALID_PROFILE, "goal": "cut", "weekly_rate_kg": 0.25},
+        headers=headers,
+    ).json()
+    steep = client.put(
+        "/api/v1/profile",
+        json={**VALID_PROFILE, "goal": "cut", "weekly_rate_kg": 1.0},
+        headers=headers,
+    ).json()
+
+    assert gentle["targets"]["calories"] > steep["targets"]["calories"]
+
+    # Asserted on the *uncapped* figure, because for this profile the steeper
+    # pace lands below BMR and is clamped up — so the final numbers differ by
+    # less than the arithmetic implies. Checking `calories` here would have been
+    # a test that passes for the wrong reason.
+    # 0.75 kg/week of difference is 0.75 * 7700 / 7 ~= 825 kcal a day.
+    assert gentle["targets"]["uncapped_calories"] - steep["targets"][
+        "uncapped_calories"
+    ] == pytest.approx(825, abs=2)
+
+
+def test_an_unreachable_pace_is_clamped_and_says_so(client: TestClient) -> None:
+    """Picking a fast pace must not quietly hand someone a sub-BMR target.
+
+    1 kg a week for this profile implies 1,659 kcal against a BMR of 1,780. The
+    plan is raised to the floor and the warning explains it, rather than the app
+    prescribing a number it knows is not survivable.
+    """
+    headers = auth_headers(client)
+
+    targets = client.put(
+        "/api/v1/profile",
+        json={**VALID_PROFILE, "goal": "cut", "weekly_rate_kg": 1.0},
+        headers=headers,
+    ).json()["targets"]
+
+    assert targets["was_clamped"]
+    assert targets["calories"] > targets["uncapped_calories"]
+    assert targets["calories"] >= targets["bmr"]
+    assert any("raised" in warning for warning in targets["warnings"])
+
+
+def test_the_pace_is_stored_and_read_back(client: TestClient) -> None:
+    headers = auth_headers(client)
+    client.put(
+        "/api/v1/profile",
+        json={**VALID_PROFILE, "goal": "cut", "weekly_rate_kg": 0.75},
+        headers=headers,
+    )
+
+    profile = client.get("/api/v1/profile", headers=headers).json()["profile"]
+
+    assert profile["weekly_rate_kg"] == 0.75
+
+
+def test_omitting_the_pace_falls_back_to_the_goals_default(client: TestClient) -> None:
+    """An older client that does not know about the picker still gets a coherent
+    plan rather than a null that silently reverts to the old multipliers."""
+    headers = auth_headers(client)
+
+    body = client.put(
+        "/api/v1/profile", json={**VALID_PROFILE, "goal": "lean_bulk"}, headers=headers
+    ).json()
+
+    assert body["profile"]["weekly_rate_kg"] == 0.25
+
+
+def test_an_unsafe_pace_is_rejected_at_the_api(client: TestClient) -> None:
+    headers = auth_headers(client)
+
+    response = client.put(
+        "/api/v1/profile",
+        json={**VALID_PROFILE, "goal": "cut", "weekly_rate_kg": 5},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_a_negative_pace_is_rejected_at_the_api(client: TestClient) -> None:
+    """Direction belongs to the goal. A signed rate would be a second, and
+    contradictable, source of truth about which way the weight moves."""
+    headers = auth_headers(client)
+
+    response = client.put(
+        "/api/v1/profile",
+        json={**VALID_PROFILE, "goal": "cut", "weekly_rate_kg": -0.5},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_the_derivation_names_the_pace(client: TestClient) -> None:
+    """The explanation must describe the calculation that actually ran."""
+    headers = auth_headers(client)
+
+    body = client.put(
+        "/api/v1/profile",
+        json={**VALID_PROFILE, "goal": "cut", "weekly_rate_kg": 0.5},
+        headers=headers,
+    ).json()
+
+    labels = [step["label"] for step in body["targets"]["derivation"]]
+    assert "0.5 kg per week" in labels

@@ -50,6 +50,11 @@ MIN_CALORIES_FEMALE: Final = 1200
 #: about — faster loss increasingly comes from muscle rather than fat.
 MAX_SAFE_WEEKLY_CHANGE_FRACTION: Final = 0.01
 
+#: Hardest rate the app will produce a target for, in kg per week. Not a
+#: recommendation — a refusal boundary. Above this the arithmetic still works and
+#: the answer stops being something an app should hand someone.
+MAX_WEEKLY_RATE_KG: Final = 1.5
+
 
 class Sex(StrEnum):
     """Biological sex, used only for the Mifflin-St Jeor constant and the floor.
@@ -91,6 +96,28 @@ GOAL_MULTIPLIERS: Final[dict[Goal, float]] = {
     Goal.MAINTAIN: 1.00,
     Goal.LEAN_BULK: 1.10,
     Goal.BULK: 1.15,
+}
+
+#: Which way each goal moves the scale. Used to turn a rate the user picked —
+#: always stated as a positive "how fast" — into a signed calorie adjustment.
+GOAL_DIRECTION: Final[dict[Goal, int]] = {
+    Goal.CUT: -1,
+    Goal.MAINTAIN: 0,
+    Goal.LEAN_BULK: +1,
+    Goal.BULK: +1,
+}
+
+#: Where the rate picker opens for each goal, in kg per week.
+#:
+#: These reproduce roughly what the multipliers above did for an average adult,
+#: so someone who accepts the default lands where the app used to put them.
+#: Lean bulk is deliberately slower than bulk — the distinction between the two
+#: goals *is* the rate, and above about 0.25 kg a week the extra is mostly fat.
+DEFAULT_WEEKLY_RATE_KG: Final[dict[Goal, float]] = {
+    Goal.CUT: 0.5,
+    Goal.MAINTAIN: 0.0,
+    Goal.LEAN_BULK: 0.25,
+    Goal.BULK: 0.5,
 }
 
 #: Grams of protein per kg of bodyweight. Higher on a cut: in a calorie deficit
@@ -174,6 +201,20 @@ class NutritionTargets:
 # --------------------------------------------------------------------------- #
 
 
+def validate_weekly_rate(rate_kg: float) -> None:
+    """Reject a pace this app will not write a target for."""
+    if rate_kg < 0:
+        raise InvalidBodyStats(
+            "Rate of change is how fast, not which way — it cannot be negative. "
+            "The goal decides the direction."
+        )
+    if rate_kg > MAX_WEEKLY_RATE_KG:
+        raise InvalidBodyStats(
+            f"{rate_kg:g} kg per week is beyond the {MAX_WEEKLY_RATE_KG:g} kg limit this app "
+            "will plan for."
+        )
+
+
 def validate_body_stats(*, age_years: int, height_cm: float, weight_kg: float) -> None:
     """Reject input a human body cannot have.
 
@@ -255,13 +296,35 @@ def calculate_targets(
     weight_kg: float,
     activity_level: ActivityLevel,
     goal: Goal,
+    weekly_rate_kg: float | None = None,
 ) -> NutritionTargets:
-    """Produce a full daily target, with its derivation and any warnings."""
+    """Produce a full daily target, with its derivation and any warnings.
+
+    **`weekly_rate_kg` is how fast the user chose to move**, always positive; the
+    goal supplies the direction. When it is `None` the older fixed-percentage
+    multipliers apply, so profiles created before the picker existed keep exactly
+    the targets they had.
+
+    The rate is the better model and is what onboarding now collects. A 20%
+    deficit is a statement about arithmetic; "0.5 kg a week" is a statement about
+    the user's body, and it is the one they can actually check against the scale.
+    It also scales correctly: 20% off a small person's expenditure is a far
+    gentler deficit than 20% off a large one's, which is not what either of them
+    picked when they both tapped "lose weight".
+    """
     validate_body_stats(age_years=age_years, height_cm=height_cm, weight_kg=weight_kg)
 
     bmr = calculate_bmr(sex=sex, age_years=age_years, height_cm=height_cm, weight_kg=weight_kg)
     tdee = calculate_tdee(bmr, activity_level)
-    goal_calories = tdee * GOAL_MULTIPLIERS[goal]
+
+    if weekly_rate_kg is None:
+        goal_calories = tdee * GOAL_MULTIPLIERS[goal]
+    else:
+        validate_weekly_rate(weekly_rate_kg)
+        daily_adjustment = (
+            GOAL_DIRECTION[goal] * weekly_rate_kg * KCAL_PER_KG_BODY_FAT / 7
+        )
+        goal_calories = tdee + daily_adjustment
 
     # ---- safety floors ---------------------------------------------------
     absolute_floor = MIN_CALORIES_MALE if sex is Sex.MALE else MIN_CALORIES_FEMALE
@@ -322,6 +385,43 @@ def calculate_targets(
             calories=calories,
             was_clamped=was_clamped,
             macros=macros,
+            weekly_rate_kg=weekly_rate_kg,
+        ),
+    )
+
+
+def _adjustment_step(
+    goal: Goal, goal_calories: float, tdee: float, weekly_rate_kg: float | None
+) -> DerivationStep:
+    """The line explaining how the target moved away from maintenance.
+
+    Two forms, because there are two calculations and describing the wrong one
+    is exactly the drift this whole derivation exists to prevent.
+    """
+    if weekly_rate_kg is None:
+        return DerivationStep(
+            label=f"Adjusted to {goal.value.replace('_', ' ')}",
+            value=f"{round(goal_calories):,} kcal",
+            detail=f"Daily expenditure x {GOAL_MULTIPLIERS[goal]:.2f}.",
+        )
+
+    if GOAL_DIRECTION[goal] == 0 or weekly_rate_kg == 0:
+        return DerivationStep(
+            label="Holding steady",
+            value=f"{round(goal_calories):,} kcal",
+            detail="No deficit or surplus — this is your daily expenditure.",
+        )
+
+    delta = abs(round(goal_calories - tdee))
+    word = "deficit" if GOAL_DIRECTION[goal] < 0 else "surplus"
+    return DerivationStep(
+        label=f"{weekly_rate_kg:g} kg per week",
+        value=f"{round(goal_calories):,} kcal",
+        detail=(
+            f"A kilogram of body fat holds about {KCAL_PER_KG_BODY_FAT:,} kcal, so "
+            f"{weekly_rate_kg:g} kg a week needs a {delta:,} kcal daily {word}. "
+            "That figure is an approximation — real bodies are not this tidy — so treat "
+            "the scale over a few weeks as the real answer."
         ),
     )
 
@@ -340,6 +440,7 @@ def _build_derivation(
     calories: int,
     was_clamped: bool,
     macros: MacroTargets,
+    weekly_rate_kg: float | None = None,
 ) -> list[DerivationStep]:
     """The explanation the results screen renders.
 
@@ -364,11 +465,7 @@ def _build_derivation(
                 f"{activity_level.value.replace('_', ' ')} activity."
             ),
         ),
-        DerivationStep(
-            label=f"Adjusted to {goal.value.replace('_', ' ')}",
-            value=f"{round(goal_calories):,} kcal",
-            detail=f"Daily expenditure x {GOAL_MULTIPLIERS[goal]:.2f}.",
-        ),
+        _adjustment_step(goal, goal_calories, tdee, weekly_rate_kg),
     ]
 
     if was_clamped:
