@@ -12,13 +12,14 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View
 
 import { type Meal, deleteMeal, listMeals, logMeal } from '@/api/catalogue';
 import { ApiError } from '@/api/client';
-import { MEAL_LABELS, MEAL_SLOTS, type MealSlot } from '@/api/diary';
+import { MEAL_SLOTS, type MealSlot } from '@/api/diary';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { FoodThumb } from '@/components/food-thumb';
 import { EnterUp, PressableScale } from '@/components/motion';
 import { Screen } from '@/components/screen';
 import { draftActions } from '@/features/meals/draft-store';
+import { useT } from '@/i18n';
 import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -30,6 +31,7 @@ type State =
 
 export default function MealsScreen() {
   const router = useRouter();
+  const t = useT();
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [logging, setLogging] = useState<string | null>(null);
 
@@ -54,12 +56,12 @@ export default function MealsScreen() {
   );
 
   const askSlotAndLog = (meal: Meal) => {
-    Alert.alert(meal.name, 'Which meal?', [
+    Alert.alert(meal.name, t('meals.whichMeal'), [
       ...MEAL_SLOTS.map((slot) => ({
-        text: MEAL_LABELS[slot],
+        text: t(`slot.${slot}`),
         onPress: () => void send(meal, slot),
       })),
-      { text: 'Cancel', style: 'cancel' as const },
+      { text: t('common.cancel'), style: 'cancel' as const },
     ]);
   };
 
@@ -79,10 +81,10 @@ export default function MealsScreen() {
   };
 
   const confirmDelete = (meal: Meal) => {
-    Alert.alert('Delete this meal?', `"${meal.name}" will be removed.`, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('meals.deleteTitle'), t('meals.deleteBody', { name: meal.name }), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: () => {
           void (async () => {
@@ -101,9 +103,9 @@ export default function MealsScreen() {
   return (
     <Screen>
       <View style={styles.header}>
-        <Text style={text.overline}>My meals</Text>
+        <Text style={text.overline}>{t('meals.title')}</Text>
         <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancel}>
-          <Text style={styles.cancelLabel}>Close</Text>
+          <Text style={styles.cancelLabel}>{t('common.close')}</Text>
         </Pressable>
       </View>
 
@@ -115,7 +117,7 @@ export default function MealsScreen() {
 
       {state.kind === 'error' && (
         <View style={styles.centered}>
-          <Text style={text.title}>Couldn&apos;t load</Text>
+          <Text style={text.title}>{t('catalogue.cantLoad')}</Text>
           <Text style={[text.bodyMuted, styles.centeredBody]}>{state.message}</Text>
         </View>
       )}
@@ -125,10 +127,9 @@ export default function MealsScreen() {
           {state.meals.length === 0 ? (
             <View style={styles.empty}>
               <Text style={styles.emptyGlyph}>🍽</Text>
-              <Text style={text.title}>No meals yet</Text>
+              <Text style={text.title}>{t('meals.emptyTitle')}</Text>
               <Text style={[text.bodyMuted, styles.centeredBody]}>
-                Build the plates you eat often — a breakfast, a usual lunch — and logging one
-                becomes two taps instead of six.
+{t('meals.emptyBody')}
               </Text>
             </View>
           ) : (
@@ -147,7 +148,10 @@ export default function MealsScreen() {
                           {meal.name}
                         </Text>
                         <Text style={text.bodyMuted}>
-                          {meal.items.length} ingredients · {Math.round(meal.totals.total_grams)} g
+                          {t('meals.ingredientCount', {
+                            count: meal.items.length,
+                            grams: Math.round(meal.totals.total_grams),
+                          })}
                         </Text>
                       </View>
                       <View style={styles.kcalBlock}>
@@ -171,9 +175,9 @@ export default function MealsScreen() {
                     </View>
 
                     <View style={styles.macros}>
-                      <Macro label="Protein" value={meal.totals.protein_g} tint={color.proteinTint} />
-                      <Macro label="Carbs" value={meal.totals.carbs_g} tint={color.carbsTint} />
-                      <Macro label="Fat" value={meal.totals.fat_g} tint={color.fatTint} />
+                      <Macro label={t('common.protein')} value={meal.totals.protein_g} tint={color.proteinTint} />
+                      <Macro label={t('common.carbs')} value={meal.totals.carbs_g} tint={color.carbsTint} />
+                      <Macro label={t('common.fat')} value={meal.totals.fat_g} tint={color.fatTint} />
                     </View>
 
                     {/* Mongo has no foreign keys, so an ingredient can genuinely
@@ -182,10 +186,14 @@ export default function MealsScreen() {
                         quietly fallen with no explanation. */}
                     {meal.missing_slugs.length > 0 && (
                       <Text style={styles.warning}>
-                        {meal.missing_slugs.length} ingredient
-                        {meal.missing_slugs.length === 1 ? ' is' : 's are'} no longer in the
-                        catalogue and {meal.missing_slugs.length === 1 ? 'is' : 'are'} not
-                        counted above.
+                        {/* Separate strings for one and many rather than an
+                            English-shaped "s" suffix. French pluralises
+                            differently ("figure" vs "figurent"), and building a
+                            sentence out of fragments only works in the language
+                            it was written for. */}
+                        {meal.missing_slugs.length === 1
+                          ? t('meals.missingOne')
+                          : t('meals.missingMany', { count: meal.missing_slugs.length })}
                       </Text>
                     )}
                   </Pressable>
@@ -215,10 +223,10 @@ export default function MealsScreen() {
                       accessibilityRole="button"
                       style={styles.secondaryAction}
                     >
-                      <Text style={styles.secondaryLabel}>Edit</Text>
+                      <Text style={styles.secondaryLabel}>{t('common.edit')}</Text>
                     </PressableScale>
                     <Text style={styles.hint}>
-                      {logging === meal.id ? 'Logging…' : 'Tap to log · hold to delete'}
+                      {logging === meal.id ? t('meals.logging') : t('meals.tapToLog')}
                     </Text>
                   </View>
                 </Card>
@@ -227,7 +235,7 @@ export default function MealsScreen() {
           )}
 
           <Button
-            label="Compose a meal"
+            label={t('meals.compose')}
             onPress={() => {
               draftActions.reset();
               router.push('/meal-builder');

@@ -26,6 +26,7 @@ import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
+import { useT } from '@/i18n';
 
 /** Mirrors the backend's PASSWORD_MIN_LENGTH. */
 const PASSWORD_MIN_LENGTH = 8;
@@ -64,6 +65,7 @@ export function AuthForm({
   showForgotPassword = false,
   onSubmit,
 }: AuthFormProps) {
+  const t = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
@@ -83,13 +85,13 @@ export function AuthForm({
     const errors: FieldErrors = {};
 
     if (!email.trim()) {
-      errors.email = 'Enter your email address.';
+      errors.email = t('auth.needEmail');
     } else if (!email.includes('@') || !email.includes('.')) {
       errors.email = "That doesn't look like an email address.";
     }
 
     if (!password) {
-      errors.password = 'Enter your password.';
+      errors.password = t('auth.needPassword');
     } else if (requireConfirmation && password.length < PASSWORD_MIN_LENGTH) {
       errors.password = `Use at least ${PASSWORD_MIN_LENGTH} characters.`;
     }
@@ -116,7 +118,7 @@ export function AuthForm({
       setFormError(
         error instanceof ApiError
           ? error.userMessage
-          : 'Something went wrong. Please try again.',
+          : t('common.error'),
       );
     } finally {
       setSubmitting(false);
@@ -148,7 +150,7 @@ export function AuthForm({
 
             <View style={styles.fields}>
             <TextField
-              label="Email"
+              label={t('auth.email')}
               value={email}
               onChangeText={setEmail}
               error={fieldErrors.email}
@@ -168,7 +170,7 @@ export function AuthForm({
 
             <TextField
               ref={passwordRef}
-              label="Password"
+              label={t('auth.password')}
               value={password}
               onChangeText={setPassword}
               error={fieldErrors.password}
@@ -190,7 +192,7 @@ export function AuthForm({
             {requireConfirmation && (
               <TextField
                 ref={confirmationRef}
-                label="Confirm password"
+                label={t('auth.confirmPassword')}
                 value={confirmation}
                 onChangeText={setConfirmation}
                 error={fieldErrors.confirmation}

@@ -21,7 +21,6 @@ import {
 
 import { ApiError } from '@/api/client';
 import {
-  MEAL_LABELS,
   type FoodSearchResult,
   type MealSlot,
   type PopularFood,
@@ -33,6 +32,7 @@ import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
 import { PressableScale } from '@/components/motion';
 import { draftActions } from '@/features/recipes/draft-store';
+import { useT } from '@/i18n';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -47,6 +47,7 @@ type State =
 
 export default function SearchScreen() {
   const router = useRouter();
+  const t = useT();
   const { slot, day, mode, q } = useLocalSearchParams<{
     slot?: MealSlot;
     day?: string;
@@ -133,13 +134,13 @@ export default function SearchScreen() {
       <View style={styles.header}>
         <Text style={text.overline}>
           {pickingIngredient
-            ? 'Add ingredient'
+            ? t('catalogue.addIngredient')
             : slot
-              ? `Add to ${MEAL_LABELS[slot]}`
-              : 'Search foods'}
+              ? t('catalogue.addTo', { slot: t(`slot.${slot}`) })
+              : t('home.searchFood')}
         </Text>
         <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancel}>
-          <Text style={styles.cancelLabel}>Cancel</Text>
+          <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
         </Pressable>
       </View>
 

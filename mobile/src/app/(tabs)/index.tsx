@@ -23,7 +23,6 @@ import { ApiError } from '@/api/client';
 import {
   type DaySummary,
   type DiaryEntry,
-  MEAL_LABELS,
   type MealSlot,
   type QuickAddFood,
   deleteEntry,
@@ -42,6 +41,7 @@ import { ProgressRing } from '@/components/progress-ring';
 import { Screen } from '@/components/screen';
 import { WeekStrip } from '@/components/week-strip';
 import { Wordmark } from '@/components/wordmark';
+import { type Translate, useT } from '@/i18n';
 import { photo } from '@/theme/imagery';
 import { HIT_SLOP_MIN, color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
@@ -60,15 +60,16 @@ function slotForNow(): MealSlot {
   return 'dinner';
 }
 
-function greeting(): string {
+function greeting(t: Translate): string {
   const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (hour < 12) return t('home.goodMorning');
+  if (hour < 18) return t('home.goodAfternoon');
+  return t('home.goodEvening');
 }
 
 export default function HomeScreen() {
   const router = useRouter();
+  const t = useT();
   const [day, setDay] = useState(localDateString());
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [streak, setStreak] = useState<number | null>(null);
@@ -204,7 +205,7 @@ export default function HomeScreen() {
     <Screen>
       <View style={styles.header}>
         <View>
-          <Text style={styles.greeting}>{greeting()}</Text>
+          <Text style={styles.greeting}>{greeting(t)}</Text>
           <Wordmark size={24} />
         </View>
         {streak !== null && streak > 0 && (
@@ -225,7 +226,7 @@ export default function HomeScreen() {
 
       {state.kind === 'error' && (
         <Card style={styles.errorCard}>
-          <Text style={text.label}>Can&apos;t load your day</Text>
+          <Text style={text.label}>{t('home.cantLoadDay')}</Text>
           <Text style={[text.bodyMuted, styles.errorBody]}>{state.message}</Text>
         </Card>
       )}
@@ -261,7 +262,7 @@ export default function HomeScreen() {
         >
           <FabAction
             icon="camera"
-            label="Scan a meal"
+            label={t('home.scanMeal')}
             onPress={() => {
               setMenuOpen(false);
               router.push({ pathname: '/scan', params: { day } });
@@ -273,7 +274,7 @@ export default function HomeScreen() {
               hatch for the thing the catalogue does not carry. */}
           <FabAction
             icon="restaurant"
-            label="My meals"
+            label={t('home.myMeals')}
             onPress={() => {
               setMenuOpen(false);
               router.push('/meals');
@@ -281,7 +282,7 @@ export default function HomeScreen() {
           />
           <FabAction
             icon="nutrition"
-            label="Ingredients"
+            label={t('home.ingredients')}
             onPress={() => {
               setMenuOpen(false);
               router.push({ pathname: '/catalogue', params: { slot: slotForNow(), day } });
@@ -289,7 +290,7 @@ export default function HomeScreen() {
           />
           <FabAction
             icon="search"
-            label="Search food"
+            label={t('home.searchFood')}
             onPress={() => {
               setMenuOpen(false);
               router.push({ pathname: '/search', params: { slot: slotForNow(), day } });
@@ -363,6 +364,7 @@ function Dashboard({
   onDelete: (entry: DiaryEntry) => void;
 }) {
   const router = useRouter();
+  const t = useT();
   const eaten = summary.totals.kcal;
   const remaining = summary.remaining_calories;
   const over = remaining < 0;
@@ -377,10 +379,14 @@ function Dashboard({
         <Card style={styles.calorieCard}>
           <View style={styles.calorieText}>
             <CountUp value={Math.abs(Math.round(remaining))} style={styles.calorieValue} />
-            <Text style={styles.calorieLabel}>{over ? 'Calories over' : 'Calories left'}</Text>
+            <Text style={styles.calorieLabel}>
+              {over ? t('home.caloriesOver') : t('home.caloriesLeft')}
+            </Text>
             <Text style={styles.calorieSub}>
-              {Math.round(eaten).toLocaleString()} of{' '}
-              {summary.target_calories.toLocaleString()} eaten
+              {t('home.eatenOf', {
+                eaten: Math.round(eaten).toLocaleString(),
+                target: summary.target_calories.toLocaleString(),
+              })}
             </Text>
           </View>
           <ProgressRing
@@ -399,7 +405,7 @@ function Dashboard({
       <EnterUp index={1}>
         <View style={styles.macroRow}>
           <MacroTile
-            label="Protein"
+            label={t('common.protein')}
             eaten={summary.totals.protein_g}
             target={summary.target_macros.protein_g}
             tint={color.protein}
@@ -407,7 +413,7 @@ function Dashboard({
             icon="lightning-bolt"
           />
           <MacroTile
-            label="Carbs"
+            label={t('common.carbs')}
             eaten={summary.totals.carbs_g}
             target={summary.target_macros.carbs_g}
             tint={color.carbs}
@@ -415,7 +421,7 @@ function Dashboard({
             icon="barley"
           />
           <MacroTile
-            label="Fat"
+            label={t('common.fat')}
             eaten={summary.totals.fat_g}
             target={summary.target_macros.fat_g}
             tint={color.fat}
@@ -441,7 +447,7 @@ function Dashboard({
       {quickAdd.length > 0 && (
         <EnterUp index={3}>
           <View style={styles.quickAddBlock}>
-            <Text style={styles.sectionTitle}>Your usuals</Text>
+            <Text style={styles.sectionTitle}>{t('home.yourUsuals')}</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -467,7 +473,7 @@ function Dashboard({
               <View style={styles.suggestIcon}>
                 <Ionicons name="bulb-outline" size={16} color={color.accent} />
               </View>
-              <Text style={text.heading}>What to eat next</Text>
+              <Text style={text.heading}>{t('home.whatToEat')}</Text>
             </View>
 
             {suggestions.length === 0 ? (
@@ -510,7 +516,7 @@ function Dashboard({
         </EnterUp>
       )}
 
-      <Text style={styles.sectionTitle}>Logged today</Text>
+      <Text style={styles.sectionTitle}>{t('home.loggedToday')}</Text>
 
       {entries.length === 0 ? (
         <EnterUp index={4}>
@@ -543,7 +549,7 @@ function Dashboard({
                     {entry.food_name}
                   </Text>
                   <Text style={styles.entryMeta}>
-                    {MEAL_LABELS[entry.meal_slot]} ·{' '}
+                    {t(`slot.${entry.meal_slot}`)} ·{' '}
                     {entry.servings
                       ? `${entry.servings} serving${entry.servings === 1 ? '' : 's'}`
                       : `${Math.round(entry.quantity_grams)} g`}

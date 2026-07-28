@@ -30,13 +30,14 @@ import {
   getCatalogue,
   logCatalogueFood,
 } from '@/api/catalogue';
-import { MEAL_LABELS, type MealSlot } from '@/api/diary';
+import type { MealSlot } from '@/api/diary';
 import { AmountStepper } from '@/components/amount-stepper';
 import { Button } from '@/components/button';
 import { FoodThumb } from '@/components/food-thumb';
 import { EnterUp, PressableScale } from '@/components/motion';
 import { Screen } from '@/components/screen';
 import { draftActions, itemFromFood, useDraftMeal } from '@/features/meals/draft-store';
+import { type Translate, useFrench, useT } from '@/i18n';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -55,6 +56,8 @@ export default function CatalogueScreen() {
   }>();
   const buildingMeal = mode === 'meal';
   const draft = useDraftMeal();
+  const t = useT();
+  const french = useFrench();
 
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [chosen, setChosen] = useState<CatalogueFood | null>(null);
@@ -80,10 +83,16 @@ export default function CatalogueScreen() {
     <Screen>
       <View style={styles.header}>
         <Text style={text.overline}>
-          {buildingMeal ? 'Add ingredient' : slot ? `Add to ${MEAL_LABELS[slot]}` : 'Ingredients'}
+          {buildingMeal
+            ? t('catalogue.addIngredient')
+            : slot
+              ? t('catalogue.addTo', { slot: t(`slot.${slot}`) })
+              : t('catalogue.title')}
         </Text>
         <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancel}>
-          <Text style={styles.cancelLabel}>{buildingMeal ? 'Done' : 'Cancel'}</Text>
+          <Text style={styles.cancelLabel}>
+            {buildingMeal ? t('common.done') : t('common.cancel')}
+          </Text>
         </Pressable>
       </View>
 
@@ -95,13 +104,13 @@ export default function CatalogueScreen() {
 
       {state.kind === 'error' && (
         <View style={styles.centered}>
-          <Text style={text.title}>Couldn&apos;t load</Text>
+          <Text style={text.title}>{t('catalogue.cantLoad')}</Text>
           <Text style={[text.bodyMuted, styles.centeredBody]}>{state.message}</Text>
-          <Button label="Try again" onPress={() => void load()} variant="secondary" />
+          <Button label={t('common.retry')} onPress={() => void load()} variant="secondary" />
         </View>
       )}
 
-      {state.kind === 'ready' && state.total === 0 && <EmptyCatalogue />}
+      {state.kind === 'ready' && state.total === 0 && <EmptyCatalogue t={t} />}
 
       {state.kind === 'ready' && state.total > 0 && (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -114,6 +123,7 @@ export default function CatalogueScreen() {
                     <FoodTile
                       key={food.slug}
                       food={food}
+                      french={french}
                       inMeal={buildingMeal && draft.items.some((row) => row.slug === food.slug)}
                       onPress={() => setChosen(food)}
                     />
@@ -124,7 +134,7 @@ export default function CatalogueScreen() {
           ))}
 
           <Text style={styles.footnote}>
-            {state.total} ingredients. Every number is verified against USDA FoodData Central.
+            {t('catalogue.footnote', { count: state.total })}
           </Text>
         </ScrollView>
       )}
@@ -138,9 +148,9 @@ export default function CatalogueScreen() {
           style={styles.draftBar}
         >
           <Text style={styles.draftCount}>
-            {draft.items.length} {draft.items.length === 1 ? 'ingredient' : 'ingredients'}
+            {t('catalogue.addIngredient')} · {draft.items.length}
           </Text>
-          <Text style={styles.draftAction}>Back to meal →</Text>
+          <Text style={styles.draftAction}>{t('catalogue.backToMeal')}</Text>
         </Pressable>
       )}
 
@@ -149,6 +159,7 @@ export default function CatalogueScreen() {
           food={chosen}
           slot={slot ?? 'snack'}
           day={day}
+          french={french}
           buildingMeal={buildingMeal}
           onClose={() => setChosen(null)}
           onLogged={() => {
@@ -164,23 +175,29 @@ export default function CatalogueScreen() {
 
 function FoodTile({
   food,
+  french,
   inMeal,
   onPress,
 }: {
   food: CatalogueFood;
+  french: boolean;
   inMeal: boolean;
   onPress: () => void;
 }) {
+  // From the document, not the dictionary. "Blanc de poulet" is a fact about the
+  // food that was curated with it, not a UI string a translator would produce.
+  const name = french ? food.name_fr : food.name_en;
+
   return (
     <PressableScale
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={food.name_en}
+      accessibilityLabel={name}
       style={[styles.tile, inMeal && styles.tileOn]}
     >
       <FoodThumb emoji={food.emoji} photo={food.photo} size={44} />
       <Text style={styles.tileName} numberOfLines={2}>
-        {food.name_en}
+        {name}
       </Text>
       <Text style={styles.tileKcal}>{Math.round(food.kcal)} kcal/100g</Text>
       {inMeal && <View style={styles.tileTick} />}
@@ -195,16 +212,15 @@ function FoodTile({
  * is filled by a command that needs a USDA key, and "nothing here" with no
  * explanation is indistinguishable from a broken screen.
  */
-function EmptyCatalogue() {
+function EmptyCatalogue({ t }: { t: Translate }) {
   return (
     <View style={styles.centered}>
       <Text style={styles.emptyGlyph}>🥗</Text>
-      <Text style={text.title}>The catalogue is empty</Text>
-      <Text style={[text.bodyMuted, styles.centeredBody]}>
-        Its numbers come from USDA FoodData Central, and filling it needs an API key. Run{' '}
-        <Text style={styles.code}>python -m app.cli seed-catalogue</Text> on the server once{' '}
-        <Text style={styles.code}>USDA_API_KEY</Text> is set.
-      </Text>
+      <Text style={text.title}>{t('catalogue.emptyTitle')}</Text>
+      <Text style={[text.bodyMuted, styles.centeredBody]}>{t('catalogue.emptyBody')}</Text>
+      {/* The command itself stays untranslated: it is something to type, not
+          something to read, and a localised command line would be wrong. */}
+      <Text style={styles.code}>python -m app.cli seed-catalogue</Text>
     </View>
   );
 }
@@ -220,6 +236,7 @@ function PortionSheet({
   food,
   slot,
   day,
+  french,
   buildingMeal,
   onClose,
   onLogged,
@@ -228,11 +245,13 @@ function PortionSheet({
   food: CatalogueFood;
   slot: MealSlot;
   day?: string;
+  french: boolean;
   buildingMeal: boolean;
   onClose: () => void;
   onLogged: () => void;
   onAdded: () => void;
 }) {
+  const t = useT();
   const preferred = food.portions.find((portion) => portion.is_default) ?? food.portions[0];
   const [amount, setAmount] = useState(preferred?.amount ?? 1);
   const [busy, setBusy] = useState(false);
@@ -268,16 +287,19 @@ function PortionSheet({
         <View style={styles.sheetHead}>
           <FoodThumb emoji={food.emoji} photo={food.photo} size={52} />
           <View style={styles.sheetTitles}>
-            <Text style={text.title}>{food.name_en}</Text>
-            <Text style={text.bodyMuted}>{food.name_fr}</Text>
+            {/* Both names, chosen language first. The other is genuinely useful
+                here rather than clutter: a bilingual user checking they picked
+                the right food should not have to switch language to be sure. */}
+            <Text style={text.title}>{french ? food.name_fr : food.name_en}</Text>
+            <Text style={text.bodyMuted}>{french ? food.name_en : food.name_fr}</Text>
           </View>
         </View>
 
-        <AmountStepper food={food} amount={amount} onChange={setAmount} />
+        <AmountStepper food={food} amount={amount} onChange={setAmount} french={french} />
 
         <View style={styles.summary}>
           <Text style={styles.summaryKcal}>{kcal}</Text>
-          <Text style={styles.summaryUnit}>kcal</Text>
+          <Text style={styles.summaryUnit}>{t('common.kcal')}</Text>
           <View style={styles.summarySpacer} />
           <Macro label="P" value={(food.protein_g * grams) / 100} tint={color.proteinTint} />
           <Macro label="C" value={(food.carbs_g * grams) / 100} tint={color.carbsTint} />
@@ -291,7 +313,11 @@ function PortionSheet({
         )}
 
         <Button
-          label={buildingMeal ? 'Add to meal' : `Log to ${MEAL_LABELS[slot]}`}
+          label={
+            buildingMeal
+              ? t('catalogue.addToMeal')
+              : t('catalogue.logTo', { slot: t(`slot.${slot}`) })
+          }
           onPress={() => void submit()}
           loading={busy}
         />

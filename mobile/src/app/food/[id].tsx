@@ -15,7 +15,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ApiError } from '@/api/client';
 import {
   type Food,
-  MEAL_LABELS,
+  MEAL_SLOTS,
   type MealSlot,
   getFood,
   logFood,
@@ -27,9 +27,11 @@ import { TextField } from '@/components/text-field';
 import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
+import { useT } from '@/i18n';
 
 export default function FoodDetailScreen() {
   const router = useRouter();
+  const t = useT();
   const { id, slot, day } = useLocalSearchParams<{
     id: string;
     slot?: MealSlot;
@@ -135,7 +137,7 @@ export default function FoodDetailScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={text.overline}>Add to {MEAL_LABELS[chosenSlot]}</Text>
+        <Text style={text.overline}>{t('catalogue.addTo', { slot: t(`slot.${chosenSlot}`) })}</Text>
         <Text style={text.title}>{food.name}</Text>
         {food.brand && <Text style={[text.bodyMuted, styles.brand]}>{food.brand}</Text>}
 
@@ -150,7 +152,7 @@ export default function FoodDetailScreen() {
 
         <Text style={[text.overline, styles.sectionLabel]}>Meal</Text>
         <View style={styles.slotRow}>
-          {(Object.keys(MEAL_LABELS) as MealSlot[]).map((option) => {
+          {MEAL_SLOTS.map((option) => {
             const selected = option === chosenSlot;
             return (
               <Pressable
@@ -161,7 +163,7 @@ export default function FoodDetailScreen() {
                 style={[styles.slotChip, selected && styles.slotChipSelected]}
               >
                 <Text style={[styles.slotChipLabel, selected && styles.slotChipLabelSelected]}>
-                  {MEAL_LABELS[option]}
+                  {t(`slot.${option}`)}
                 </Text>
               </Pressable>
             );

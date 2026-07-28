@@ -16,6 +16,13 @@ export type MealSlot = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
 export const MEAL_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner', 'snack'];
 
+/**
+ * English meal-slot labels.
+ *
+ * @deprecated No screen uses this any more — slot names come from the
+ * dictionary via `t('slot.breakfast')`, so they translate. Kept only because it
+ * is part of this module's public shape; delete it once nothing imports it.
+ */
 export const MEAL_LABELS: Record<MealSlot, string> = {
   breakfast: 'Breakfast',
   lunch: 'Lunch',

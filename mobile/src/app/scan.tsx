@@ -32,7 +32,8 @@ import {
 import { ApiError } from '@/api/client';
 import {
   type FoodSearchResult,
-  MEAL_LABELS,
+
+  MEAL_SLOTS,
   type MealSlot,
   logFood,
 } from '@/api/diary';
@@ -44,6 +45,7 @@ import { TextField } from '@/components/text-field';
 import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, cardShadow, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
+import { useT } from '@/i18n';
 
 /**
  * Longest edge of the uploaded image.
@@ -108,6 +110,7 @@ function slotForNow(): MealSlot {
 
 export default function ScanScreen() {
   const router = useRouter();
+  const t = useT();
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [slot, setSlot] = useState<MealSlot>(slotForNow);
   const [logging, setLogging] = useState(false);
@@ -388,6 +391,7 @@ function Review({
   logging: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
 
   const loggable = state.items.filter(
     (item) => item.selected && item.match && gramsOf(item) > 0,
@@ -442,7 +446,7 @@ function Review({
 
         <Text style={[text.overline, styles.sectionLabel]}>Meal</Text>
         <View style={styles.slotRow}>
-          {(Object.keys(MEAL_LABELS) as MealSlot[]).map((option) => {
+          {MEAL_SLOTS.map((option) => {
             const selected = option === slot;
             return (
               <Pressable
@@ -453,7 +457,7 @@ function Review({
                 style={[styles.slotChip, selected && styles.slotChipSelected]}
               >
                 <Text style={[styles.slotChipLabel, selected && styles.slotChipLabelSelected]}>
-                  {MEAL_LABELS[option]}
+                  {t(`slot.${option}`)}
                 </Text>
               </Pressable>
             );

@@ -27,7 +27,14 @@ export const MAX_SAFE_WEEKLY_CHANGE_FRACTION = 0.01;
 export interface PaceOption {
   /** kg per week, always positive. The goal supplies the direction. */
   rateKg: number;
-  label: string;
+  /**
+   * When the target is reached, already localised — "May 2027", "mai 2027".
+   * Null when there is no target to project to.
+   *
+   * A formatted fragment rather than a whole label, because the sentence around
+   * it is a translated string and this module has no business assembling one.
+   */
+  arrival: string | null;
   /** Roughly what it costs or adds per day. */
   dailyKcal: number;
   /** Weeks to reach the target weight, or null when there is no target. */
@@ -93,10 +100,7 @@ export function buildPaceOptions(
     const weeks = weeksToTarget(currentKg, targetKg, rateKg);
     return {
       rateKg,
-      label:
-        weeks === null
-          ? `${rateKg} kg per week`
-          : `${rateKg} kg per week · ${formatArrival(dateInWeeks(weeks), locale)}`,
+      arrival: weeks === null ? null : formatArrival(dateInWeeks(weeks), locale),
       dailyKcal: dailyKcalFor(rateKg),
       weeks,
       aggressive: rateKg > safeMax,

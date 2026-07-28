@@ -52,6 +52,11 @@ const config: ExpoConfig = {
     // Expo Go, which cannot apply config plugins, but it must be declared now so
     // the first real build in Phase 7 is not missing it.
     'expo-secure-store',
+    // Reads the device's language and region. Like expo-secure-store above, the
+    // plugin does nothing inside Expo Go — the module falls back to a JS
+    // implementation — but it must be declared now so the first real build does
+    // not silently lose locale detection.
+    'expo-localization',
     [
       'expo-splash-screen',
       {

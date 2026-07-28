@@ -35,12 +35,15 @@ import {
   draftTotals,
   useDraftMeal,
 } from '@/features/meals/draft-store';
+import { useFrench, useT } from '@/i18n';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
 export default function MealBuilderScreen() {
   const router = useRouter();
   const draft = useDraftMeal();
+  const t = useT();
+  const french = useFrench();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,10 +77,10 @@ export default function MealBuilderScreen() {
       router.back();
       return;
     }
-    Alert.alert('Discard this meal?', 'Nothing will be saved.', [
-      { text: 'Keep editing', style: 'cancel' },
+    Alert.alert(t('meals.discardTitle'), t('meals.discardBody'), [
+      { text: t('meals.keepEditing'), style: 'cancel' },
       {
-        text: 'Discard',
+        text: t('meals.discard'),
         style: 'destructive',
         onPress: () => {
           draftActions.reset();
@@ -90,9 +93,9 @@ export default function MealBuilderScreen() {
   return (
     <Screen>
       <View style={styles.header}>
-        <Text style={text.overline}>{editing ? 'Edit meal' : 'New meal'}</Text>
+        <Text style={text.overline}>{editing ? t('meals.edit') : t('meals.new')}</Text>
         <Pressable onPress={discard} accessibilityRole="button" style={styles.cancel}>
-          <Text style={styles.cancelLabel}>Cancel</Text>
+          <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
         </Pressable>
       </View>
 
@@ -102,10 +105,10 @@ export default function MealBuilderScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <TextField
-          label="Name"
+          label={t('meals.name')}
           value={draft.name}
           onChangeText={draftActions.setName}
-          placeholder="Breakfast, usual lunch…"
+          placeholder={t('meals.namePlaceholder')}
           maxLength={80}
         />
 
@@ -114,28 +117,31 @@ export default function MealBuilderScreen() {
             <Text style={styles.totalsKcal}>{Math.round(totals.kcal)}</Text>
             <Text style={styles.totalsUnit}>kcal</Text>
             <View style={styles.spacer} />
-            <Text style={text.bodyMuted}>{Math.round(totals.grams)} g total</Text>
+            <Text style={text.bodyMuted}>
+              {t('meals.totalGrams', { grams: Math.round(totals.grams) })}
+            </Text>
           </View>
           <View style={styles.macros}>
-            <Macro label="Protein" value={totals.protein_g} tint={color.proteinTint} />
-            <Macro label="Carbs" value={totals.carbs_g} tint={color.carbsTint} />
-            <Macro label="Fat" value={totals.fat_g} tint={color.fatTint} />
+            <Macro label={t('common.protein')} value={totals.protein_g} tint={color.proteinTint} />
+            <Macro label={t('common.carbs')} value={totals.carbs_g} tint={color.carbsTint} />
+            <Macro label={t('common.fat')} value={totals.fat_g} tint={color.fatTint} />
           </View>
         </Card>
 
         {draft.items.length === 0 ? (
           <View style={styles.empty}>
             <Text style={text.bodyMuted}>
-              No ingredients yet. Add the things you put on the plate — the amounts stay in each
-              food&apos;s own unit.
+{t('meals.noIngredients')}
             </Text>
           </View>
         ) : (
-          draft.items.map((item) => <IngredientRow key={item.slug} item={item} />)
+          draft.items.map((item) => (
+            <IngredientRow key={item.slug} item={item} french={french} />
+          ))
         )}
 
         <Button
-          label="Add ingredient"
+          label={t('catalogue.addIngredient')}
           variant="secondary"
           onPress={() => router.push({ pathname: '/catalogue', params: { mode: 'meal' } })}
         />
@@ -147,21 +153,22 @@ export default function MealBuilderScreen() {
         )}
 
         <Button
-          label={editing ? 'Save changes' : 'Save meal'}
+          label={editing ? t('meals.saveChanges') : t('meals.save')}
           onPress={() => void save()}
           disabled={!canSave}
           loading={saving}
         />
 
         {!canSave && draft.items.length > 0 && (
-          <Text style={styles.hint}>Give the meal a name to save it.</Text>
+          <Text style={styles.hint}>{t('meals.needsName')}</Text>
         )}
       </ScrollView>
     </Screen>
   );
 }
 
-function IngredientRow({ item }: { item: DraftMealItem }) {
+function IngredientRow({ item, french }: { item: DraftMealItem; french: boolean }) {
+  const name = french ? item.nameFr : item.nameEn;
   const step = amountStep(item.unit);
   const suffix = unitSuffix(item.unit);
   const grams = item.amount * item.gramsPerUnit;
@@ -181,7 +188,7 @@ function IngredientRow({ item }: { item: DraftMealItem }) {
 
       <View style={styles.rowText}>
         <Text style={text.label} numberOfLines={1}>
-          {item.nameEn}
+          {name}
         </Text>
         <Text style={styles.rowMeta}>
           {Math.round((item.kcal * grams) / 100)} kcal
@@ -193,7 +200,7 @@ function IngredientRow({ item }: { item: DraftMealItem }) {
         <Pressable
           onPress={() => nudge(-step)}
           accessibilityRole="button"
-          accessibilityLabel={`Less ${item.nameEn}`}
+          accessibilityLabel={`- ${name}`}
           style={styles.stepButton}
         >
           <Text style={styles.stepGlyph}>−</Text>
@@ -205,7 +212,7 @@ function IngredientRow({ item }: { item: DraftMealItem }) {
         <Pressable
           onPress={() => nudge(step)}
           accessibilityRole="button"
-          accessibilityLabel={`More ${item.nameEn}`}
+          accessibilityLabel={`+ ${name}`}
           style={styles.stepButton}
         >
           <Text style={styles.stepGlyph}>+</Text>
@@ -215,7 +222,7 @@ function IngredientRow({ item }: { item: DraftMealItem }) {
       <PressableScale
         onPress={() => draftActions.removeItem(item.slug)}
         accessibilityRole="button"
-        accessibilityLabel={`Remove ${item.nameEn}`}
+        accessibilityLabel={`x ${name}`}
         style={styles.remove}
       >
         <Text style={styles.removeGlyph}>×</Text>

@@ -16,10 +16,12 @@ import { type ProfileWithTargets, getProfile } from '@/api/profile';
 import { useAuth } from '@/auth/context';
 import { Card } from '@/components/card';
 import { Screen } from '@/components/screen';
+import { type LanguagePreference, useLanguage, useT } from '@/i18n';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
 export default function SettingsScreen() {
+  const t = useT();
   const router = useRouter();
   const { user, signOut } = useAuth();
   const [data, setData] = useState<ProfileWithTargets | null>(null);
@@ -46,7 +48,7 @@ export default function SettingsScreen() {
 
   return (
     <Screen>
-      <Text style={text.title}>Settings</Text>
+      <Text style={text.title}>{t('settings.title')}</Text>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {data && (
@@ -106,11 +108,19 @@ export default function SettingsScreen() {
           />
           <MenuRow
             icon="restaurant-outline"
+            label={t('meals.title')}
+            hint={t('meals.compose')}
+            onPress={() => router.push('/meals')}
+          />
+          <MenuRow
+            icon="book-outline"
             label="My recipes"
             hint="Build meals you log often"
             onPress={() => router.push('/recipes')}
           />
         </Card>
+
+        <LanguagePicker />
 
         <Card style={styles.menuCard}>
           <MenuRow icon="log-out-outline" label="Sign out" hint={user?.email} destructive
@@ -128,6 +138,49 @@ function MacroDot({ tint, label }: { tint: string; label: string }) {
       <View style={[styles.macroDot, { backgroundColor: tint }]} />
       <Text style={styles.macroDotLabel}>{label}</Text>
     </View>
+  );
+}
+
+/**
+ * Language, with "match my device" as a real option rather than a first-launch
+ * guess.
+ *
+ * That third choice is the one that matters. Storing the resolved language at
+ * first launch would freeze a French phone's app in French even after its owner
+ * switched the phone to English, with nothing on screen explaining why.
+ */
+function LanguagePicker() {
+  const { preference, setPreference, t } = useLanguage();
+
+  const options: { value: LanguagePreference; label: string }[] = [
+    { value: 'system', label: t('settings.languageSystem') },
+    { value: 'en', label: t('settings.languageEnglish') },
+    { value: 'fr', label: t('settings.languageFrench') },
+  ];
+
+  return (
+    <Card style={styles.languageCard}>
+      <Text style={text.overline}>{t('settings.language')}</Text>
+      <View style={styles.languageRow}>
+        {options.map((option) => {
+          const selected = preference === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => setPreference(option.value)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              style={[styles.languageChip, selected && styles.languageChipOn]}
+            >
+              <Text style={[styles.languageLabel, selected && styles.languageLabelOn]}>
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={styles.languageNote}>{t('settings.languageNote')}</Text>
+    </Card>
   );
 }
 
@@ -216,6 +269,19 @@ const styles = StyleSheet.create({
   stepDetail: { ...text.bodyMuted, fontSize: 12, lineHeight: 17 },
 
   menuCard: { padding: space.xs },
+  languageCard: { gap: space.md },
+  languageRow: { flexDirection: 'row', gap: space.sm },
+  languageChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+    backgroundColor: color.wash,
+  },
+  languageChipOn: { backgroundColor: color.accent },
+  languageLabel: { ...text.label, fontSize: 13 },
+  languageLabelOn: { color: color.onDark },
+  languageNote: { ...text.bodyMuted, fontSize: 11, lineHeight: 15 },
   menuRow: {
     flexDirection: 'row',
     alignItems: 'center',

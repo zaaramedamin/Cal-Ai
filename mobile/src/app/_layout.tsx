@@ -19,6 +19,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/auth/context';
+import { LanguageProvider } from '@/i18n';
 import { HOME } from '@/routes';
 import { color } from '@/theme/tokens';
 import { fontAssets } from '@/theme/typography';
@@ -90,9 +91,13 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <AuthProvider>
-        <RootNavigator />
-      </AuthProvider>
+      {/* Outside AuthProvider, because the sign-in screens need translating too
+          and language is not a property of being signed in. */}
+      <LanguageProvider>
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
+      </LanguageProvider>
     </SafeAreaProvider>
   );
 }

@@ -1,17 +1,19 @@
 import { useAuth } from '@/auth/context';
 import { AuthForm } from '@/features/auth/auth-form';
+import { useT } from '@/i18n';
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
+  const t = useT();
 
   return (
     <AuthForm
-      strapline="Photograph a meal. Every calorie traced back to USDA."
-      title="Welcome back"
-      subtitle="Sign in to pick up where you left off."
-      submitLabel="Sign in"
-      footerText="No account yet?"
-      footerLinkLabel="Create one"
+      strapline={t('auth.loginStrapline')}
+      title={t('auth.loginTitle')}
+      subtitle={t('auth.loginSubtitle')}
+      submitLabel={t('auth.signIn')}
+      footerText={t('auth.noAccount')}
+      footerLinkLabel={t('auth.createOne')}
       footerHref="/register"
       showForgotPassword
       onSubmit={signIn}

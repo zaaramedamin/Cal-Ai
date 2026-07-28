@@ -35,6 +35,7 @@ import { RulerPicker } from '@/components/ruler-picker';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
 import { buildPaceOptions } from '@/features/onboarding/pace';
+import { useLanguage } from '@/i18n';
 import {
   HEIGHT_RANGE,
   type HeightUnit,
@@ -94,6 +95,7 @@ const DIRECTIONAL_STEPS = new Set<Step>(['target', 'pace']);
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { language, t } = useLanguage();
 
   const [stepIndex, setStepIndex] = useState(0);
   const [sex, setSex] = useState<Sex | null>(null);
@@ -397,27 +399,41 @@ export default function OnboardingScreen() {
 
         {step === 'pace' && (
           <FunnelStep
-            title="How fast do you want to get there?"
-            subtitle="This is what actually sets your daily calories. Slower is easier to keep up, and keeping it up is the whole thing."
+            title={t('onboarding.paceTitle')}
+            subtitle={t('onboarding.paceSubtitle')}
             footnote={FOOTNOTE}
           >
-            {buildPaceOptions(weightKg, goal === 'maintain' ? null : targetKg).map((option) => (
-              <ChoiceCard
-                key={option.rateKg}
-                label={option.label}
-                description={
-                  `${goal === 'cut' ? '−' : '+'}${option.dailyKcal} kcal a day` +
-                  (option.weeks !== null ? ` · about ${option.weeks} weeks` : '') +
-                  (option.aggressive ? ' · faster than 1% of your bodyweight' : '')
-                }
-                selected={weeklyRateKg === option.rateKg}
-                onPress={() => setWeeklyRateKg(option.rateKg)}
-              />
-            ))}
-            <Text style={styles.illustrative}>
-              Projections assume a steady pace and about 7,700 kcal per kilogram. Real bodies are
-              less tidy — treat the scale over a few weeks as the real answer.
-            </Text>
+            {buildPaceOptions(weightKg, goal === 'maintain' ? null : targetKg, language).map(
+              (option) => (
+                <ChoiceCard
+                  key={option.rateKg}
+                  label={
+                    option.arrival === null
+                      ? t('onboarding.paceRate', { rate: option.rateKg })
+                      : `${t('onboarding.paceRate', { rate: option.rateKg })} · ${option.arrival}`
+                  }
+                  // Assembled from parts joined by a separator rather than
+                  // concatenated into a sentence. Each fragment is a complete
+                  // phrase in its own language, so nothing depends on English
+                  // word order to read correctly.
+                  description={[
+                    t('onboarding.paceDaily', {
+                      sign: goal === 'cut' ? '−' : '+',
+                      kcal: option.dailyKcal,
+                    }),
+                    option.weeks !== null
+                      ? t('onboarding.paceWeeks', { weeks: option.weeks })
+                      : null,
+                    option.aggressive ? t('onboarding.paceAggressive') : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  selected={weeklyRateKg === option.rateKg}
+                  onPress={() => setWeeklyRateKg(option.rateKg)}
+                />
+              ),
+            )}
+            <Text style={styles.illustrative}>{t('onboarding.paceCaveat')}</Text>
           </FunnelStep>
         )}
 

@@ -21,6 +21,7 @@ import {
   unitSuffix,
 } from '@/api/catalogue';
 import { PressableScale } from '@/components/motion';
+import { useT } from '@/i18n';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -33,6 +34,7 @@ interface AmountStepperProps {
 }
 
 export function AmountStepper({ food, amount, onChange, french = false }: AmountStepperProps) {
+  const t = useT();
   const step = amountStep(food.unit);
   const suffix = unitSuffix(food.unit);
 
@@ -70,7 +72,7 @@ export function AmountStepper({ food, amount, onChange, french = false }: Amount
         <Pressable
           onPress={() => nudge(-step)}
           accessibilityRole="button"
-          accessibilityLabel="Less"
+          accessibilityLabel={t('catalogue.less')}
           style={styles.stepButton}
         >
           <Text style={styles.stepGlyph}>−</Text>
@@ -91,7 +93,7 @@ export function AmountStepper({ food, amount, onChange, french = false }: Amount
         <Pressable
           onPress={() => nudge(step)}
           accessibilityRole="button"
-          accessibilityLabel="More"
+          accessibilityLabel={t('catalogue.more')}
           style={styles.stepButton}
         >
           <Text style={styles.stepGlyph}>+</Text>

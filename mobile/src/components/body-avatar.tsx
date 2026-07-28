@@ -24,6 +24,7 @@ import Animated, {
 import Svg, { Circle, Defs, G, LinearGradient, Path, Stop } from 'react-native-svg';
 
 import { bodyShape } from '@/features/body/shape';
+import { useT } from '@/i18n';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -186,6 +187,7 @@ export function BodyCard({
   weightKg: number;
   targetKg: number | null;
 }) {
+  const t = useT();
   const shape = bodyShape(weightKg, heightCm);
   const remaining = targetKg === null ? null : Math.abs(weightKg - targetKg);
 
@@ -194,34 +196,33 @@ export function BodyCard({
       <BodyAvatar heightCm={heightCm} weightKg={weightKg} size={168} />
 
       <View style={styles.readout}>
-        <Text style={text.overline}>You, right now</Text>
+        <Text style={text.overline}>{t('body.title')}</Text>
 
         <View style={styles.statRow}>
-          <Stat label="Height" value={`${Math.round(heightCm)} cm`} />
-          <Stat label="Weight" value={`${weightKg.toFixed(1)} kg`} />
+          <Stat label={t('body.height')} value={`${Math.round(heightCm)} cm`} />
+          <Stat label={t('body.weight')} value={`${weightKg.toFixed(1)} kg`} />
         </View>
 
         <View style={styles.bmiBlock}>
           <View style={styles.bmiHead}>
             <Text style={styles.bmiValue}>{shape.bmi.toFixed(1)}</Text>
-            <Text style={styles.bmiLabel}>BMI</Text>
+            <Text style={styles.bmiLabel}>{t('body.bmi')}</Text>
           </View>
           <View style={styles.bmiTrack}>
             <View style={[styles.bmiDot, { left: `${shape.factor * 100}%` }]} />
           </View>
           <Text style={styles.caveat}>
-            A population average. It cannot tell muscle from fat, so read it as one number among
-            several rather than a verdict.
+{t('body.bmiCaveat')}
           </Text>
         </View>
 
         {remaining !== null && remaining >= 0.1 && (
           <Text style={styles.remaining}>
-            {remaining.toFixed(1)} kg to your goal of {targetKg?.toFixed(0)} kg
+{t('body.toGoal', { remaining: remaining.toFixed(1), target: targetKg?.toFixed(0) ?? '' })}
           </Text>
         )}
         {remaining !== null && remaining < 0.1 && (
-          <Text style={styles.reached}>You&apos;re at your goal weight.</Text>
+          <Text style={styles.reached}>{t('body.atGoal')}</Text>
         )}
       </View>
     </View>
