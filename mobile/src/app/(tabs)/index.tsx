@@ -32,8 +32,10 @@ import {
   localDateString,
   logFood,
 } from '@/api/diary';
+import { type ProfileWithTargets, getProfile } from '@/api/profile';
 import { getProgress } from '@/api/progress';
 import { type Suggestion, getSuggestions } from '@/api/suggestions';
+import { BodyCard } from '@/components/body-avatar';
 import { Card } from '@/components/card';
 import { CountUp, EnterUp, GrowBar, PressableScale } from '@/components/motion';
 import { ProgressRing } from '@/components/progress-ring';
@@ -75,6 +77,7 @@ export default function HomeScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [suggestionNote, setSuggestionNote] = useState<string | null>(null);
+  const [body, setBody] = useState<ProfileWithTargets | null>(null);
 
   const reload = useCallback(async () => {
     setState({ kind: 'ready', summary: await getDay(day) });
@@ -119,6 +122,15 @@ export default function HomeScreen() {
           if (!cancelled) setQuickAdd(foods);
         } catch {
           /* the chips simply don't render */
+        }
+      })();
+
+      (async () => {
+        try {
+          const profile = await getProfile();
+          if (!cancelled) setBody(profile);
+        } catch {
+          /* the figure simply doesn't render */
         }
       })();
 
@@ -221,6 +233,7 @@ export default function HomeScreen() {
       {state.kind === 'ready' && (
         <Dashboard
           summary={state.summary}
+          body={body}
           quickAdd={quickAdd}
           suggestions={suggestions}
           suggestionNote={suggestionNote}
@@ -330,6 +343,7 @@ function FabAction({
 
 function Dashboard({
   summary,
+  body,
   quickAdd,
   suggestions,
   suggestionNote,
@@ -338,6 +352,9 @@ function Dashboard({
   onDelete,
 }: {
   summary: DaySummary;
+  /** Null while the profile is loading, or if it failed — the figure is
+      decoration in the strict sense and must never block the day. */
+  body: ProfileWithTargets | null;
   quickAdd: QuickAddFood[];
   suggestions: Suggestion[];
   suggestionNote: string | null;
@@ -408,8 +425,21 @@ function Dashboard({
         </View>
       </EnterUp>
 
-      {quickAdd.length > 0 && (
+      {/* Below the ring and the macros on purpose. Those answer "what can I eat
+          now", which is why someone opened the app; this answers "where am I",
+          which is a slower question and does not belong above the fast one. */}
+      {body && (
         <EnterUp index={2}>
+          <BodyCard
+            heightCm={body.profile.height_cm}
+            weightKg={body.current_weight_kg}
+            targetKg={body.profile.target_weight_kg}
+          />
+        </EnterUp>
+      )}
+
+      {quickAdd.length > 0 && (
+        <EnterUp index={3}>
           <View style={styles.quickAddBlock}>
             <Text style={styles.sectionTitle}>Your usuals</Text>
             <ScrollView
