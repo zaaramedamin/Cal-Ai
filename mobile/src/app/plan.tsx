@@ -20,12 +20,13 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import { type ProfileWithTargets, getProfile } from '@/api/profile';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { ProjectionChart } from '@/components/projection-chart';
 import { Screen } from '@/components/screen';
+import { useLanguage } from '@/i18n';
 import { HOME } from '@/routes';
 import { kgToLbs } from '@/lib/units';
 import { color, radius, space } from '@/theme/tokens';
@@ -48,6 +49,9 @@ type State =
 
 export default function PlanScreen() {
   const router = useRouter();
+  // `language` as well as `t`: the projected date is formatted by the platform,
+  // and it has to follow the app's language rather than the device's.
+  const { t, language } = useLanguage();
   const [state, setState] = useState<State>({ kind: 'loading' });
 
   useEffect(() => {
@@ -60,20 +64,20 @@ export default function PlanScreen() {
         if (cancelled) return;
         setState({
           kind: 'error',
-          message: caught instanceof ApiError ? caught.userMessage : 'Could not load your plan.',
+          message: apiErrorMessage(t, caught, 'plan.loadFailed'),
         });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   if (state.kind === 'loading') {
     return (
       <Screen>
         <View style={styles.centered}>
-          <Text style={text.bodyMuted}>Building your plan…</Text>
+          <Text style={text.bodyMuted}>{t('plan.building')}</Text>
         </View>
       </Screen>
     );
@@ -83,9 +87,9 @@ export default function PlanScreen() {
     return (
       <Screen>
         <View style={styles.centered}>
-          <Text style={text.title}>Couldn&apos;t load your plan</Text>
+          <Text style={text.title}>{t('plan.cantLoad')}</Text>
           <Text style={[text.bodyMuted, styles.errorBody]}>{state.message}</Text>
-          <Button label="Go to the dashboard" onPress={() => router.replace(HOME)} />
+          <Button label={t('plan.toDashboard')} onPress={() => router.replace(HOME)} />
         </View>
       </Screen>
     );
@@ -98,14 +102,15 @@ export default function PlanScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={styles.eyebrow}>Your personalised plan</Text>
+        <Text style={styles.eyebrow}>{t('plan.eyebrow')}</Text>
 
         {hasJourney ? (
           <>
             <Text style={styles.headline}>
-              {target < current ? 'Reaching' : 'Building to'}{' '}
-              <Text style={styles.headlineAccent}>{Math.round(target)} kg</Text> by{' '}
-              <Text style={styles.headlineAccent}>{projectedDate(current, target)}</Text>
+              {target < current ? t('plan.headlineLose') : t('plan.headlineGain')}{' '}
+              <Text style={styles.headlineAccent}>{Math.round(target)} kg</Text>{' '}
+              {t('plan.headlineBy')}{' '}
+              <Text style={styles.headlineAccent}>{projectedDate(current, target, language)}</Text>
             </Text>
 
             <Card style={styles.chartCard}>
@@ -113,39 +118,42 @@ export default function PlanScreen() {
                 startValue={current}
                 endValue={target}
                 unit="kg"
-                endLabel={projectedDate(current, target)}
+                endLabel={projectedDate(current, target, language)}
               />
             </Card>
 
             <View style={styles.disclaimer}>
               <Ionicons name="information-circle-outline" size={15} color={color.inkMuted} />
               <Text style={styles.disclaimerText}>
-                The date assumes a steady {(WEEKLY_RATE_FRACTION * 100).toFixed(2)}% of bodyweight
-                per week. The two endpoints are calculated; the curve between them is drawn to
-                illustrate, not to predict — real progress is lumpy.
+                {t('plan.disclaimer', { percent: (WEEKLY_RATE_FRACTION * 100).toFixed(2) })}
               </Text>
             </View>
           </>
         ) : (
           <Text style={styles.headline}>
-            Holding at <Text style={styles.headlineAccent}>{Math.round(current)} kg</Text>
+            {t('plan.holdingAt')}{' '}
+            <Text style={styles.headlineAccent}>{Math.round(current)} kg</Text>
           </Text>
         )}
 
-        <Text style={styles.sectionTitle}>Daily targets</Text>
+        <Text style={styles.sectionTitle}>{t('plan.dailyTargets')}</Text>
 
         <Card style={styles.calorieCard}>
           <View>
             <Text style={styles.calorieValue}>{targets.calories.toLocaleString()}</Text>
-            <Text style={styles.calorieUnit}>kcal per day</Text>
+            <Text style={styles.calorieUnit}>{t('plan.kcalPerDay')}</Text>
           </View>
           <Ionicons name="flame" size={30} color={color.flame} />
         </Card>
 
         <View style={styles.macroRow}>
-          <MacroCard label="Protein" grams={targets.macros.protein_g} tint={color.protein} />
-          <MacroCard label="Carbs" grams={targets.macros.carbs_g} tint={color.carbs} />
-          <MacroCard label="Fat" grams={targets.macros.fat_g} tint={color.fat} />
+          <MacroCard
+            label={t('common.protein')}
+            grams={targets.macros.protein_g}
+            tint={color.protein}
+          />
+          <MacroCard label={t('common.carbs')} grams={targets.macros.carbs_g} tint={color.carbs} />
+          <MacroCard label={t('common.fat')} grams={targets.macros.fat_g} tint={color.fat} />
         </View>
 
         {targets.warnings.length > 0 && (
@@ -162,7 +170,7 @@ export default function PlanScreen() {
           </View>
         )}
 
-        <Text style={styles.sectionTitle}>How the number was reached</Text>
+        <Text style={styles.sectionTitle}>{t('plan.howReached')}</Text>
         <Card>
           {/* The derivation the server returns, shown rather than summarised.
               A calorie target is a claim about someone's body; being able to
@@ -181,12 +189,10 @@ export default function PlanScreen() {
           ))}
         </Card>
 
-        <Text style={styles.editable}>
-          You can change any of this later in Settings — nothing here is locked in.
-        </Text>
+        <Text style={styles.editable}>{t('plan.editable')}</Text>
       </ScrollView>
 
-      <Button label="Start tracking" onPress={() => router.replace(HOME)} />
+      <Button label={t('plan.start')} onPress={() => router.replace(HOME)} />
     </Screen>
   );
 }
@@ -209,12 +215,15 @@ function MacroCard({ label, grams, tint }: { label: string; grams: number; tint:
  * more accurate in form and no more honest, because the dominant error here is
  * that people do not adhere perfectly, which no formula captures.
  */
-function projectedDate(currentKg: number, targetKg: number): string {
+function projectedDate(currentKg: number, targetKg: number, locale: string): string {
   const perWeek = currentKg * WEEKLY_RATE_FRACTION;
   const weeks = perWeek > 0 ? Math.abs(targetKg - currentKg) / perWeek : 0;
   const date = new Date();
   date.setDate(date.getDate() + Math.round(weeks * 7));
-  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  // The app's language, not `undefined`. `undefined` means the device locale,
+  // which is a different thing the moment somebody sets the app to French on an
+  // English phone — and this date sits inside a French sentence.
+  return date.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 const styles = StyleSheet.create({

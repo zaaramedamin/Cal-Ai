@@ -87,8 +87,8 @@ def _too_many_attempts(retry_after_seconds: float) -> HTTPException:
     )
 
 
-def _record_login_failure(email: str) -> None:
-    record_failure(
+async def _record_login_failure(email: str) -> None:
+    await record_failure(
         "login-account",
         email,
         times=LOGIN_ACCOUNT_MAX_ATTEMPTS,
@@ -199,7 +199,7 @@ async def login(
     """
     account_key = payload.email.strip()
 
-    blocked_for = is_blocked(
+    blocked_for = await is_blocked(
         "login-account",
         account_key,
         times=LOGIN_ACCOUNT_MAX_ATTEMPTS,
@@ -215,17 +215,17 @@ async def login(
         # Burn the same CPU as a real verification before failing. See
         # _DUMMY_PASSWORD_HASH above.
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
-        _record_login_failure(account_key)
+        await _record_login_failure(account_key)
         raise INVALID_CREDENTIALS
 
     if not verify_password(payload.password, user.password_hash):
-        _record_login_failure(account_key)
+        await _record_login_failure(account_key)
         raise INVALID_CREDENTIALS
 
     # Successful login wipes the account's failure count. Otherwise someone who
     # mistypes four times then succeeds still carries four strikes, and a later
     # genuine slip locks them out. Limits should punish failure, not use.
-    clear_failures("login-account", account_key)
+    await clear_failures("login-account", account_key)
 
     # We have the plaintext here and nowhere else, so this is the only moment we
     # can upgrade a hash created under weaker parameters. Without it, raising the
@@ -433,7 +433,7 @@ async def confirm_password_reset(payload: PasswordResetConfirm, session: Session
 
     # The account was locked out of logging in; a successful reset should clear
     # that, or the user fixes their password and still cannot get in.
-    clear_failures("login-account", user.email)
+    await clear_failures("login-account", user.email)
 
     await session.commit()
     logger.info("Password reset completed for user %s; all sessions revoked", user.id)

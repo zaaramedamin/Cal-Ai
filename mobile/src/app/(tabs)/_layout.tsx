@@ -8,66 +8,30 @@
  * rather than showing a place breaks the mental model of a tab bar.
  */
 
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
 
-import { color, elevation, radius, space } from '@/theme/tokens';
-import { fontFamily } from '@/theme/typography';
+import { FloatingTabBar } from '@/components/tab-bar';
+import { useT } from '@/i18n';
+import { color } from '@/theme/tokens';
 
 export default function TabsLayout() {
+  // The bar renders `options.title`, so these titles are the visible labels
+  // under the icons rather than metadata.
+  const t = useT();
+
   return (
     <Tabs
+      // The bar is a floating pill with the logging action beside it, which no
+      // combination of `tabBarStyle` options can express — see components/tab-bar.
+      tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        // Indigo marks the active tab, matching every other 'this is live'
-        // signal in the app. A black active tab is indistinguishable from the
-        // label text beside it.
-        tabBarActiveTintColor: color.accent,
-        tabBarInactiveTintColor: color.inkFaint,
-        tabBarStyle: {
-          backgroundColor: color.surface,
-          borderTopWidth: 0,
-          height: 64,
-          paddingTop: space.sm,
-          paddingBottom: space.sm,
-          borderTopLeftRadius: radius.lg,
-          borderTopRightRadius: radius.lg,
-          ...elevation.mid,
-        },
-        tabBarLabelStyle: {
-          fontFamily: fontFamily.semiBold,
-          fontSize: 11,
-        },
         sceneStyle: { backgroundColor: color.canvas },
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color: tint, size }) => (
-            <Ionicons name="home" size={size} color={tint} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="progress"
-        options={{
-          title: 'Progress',
-          tabBarIcon: ({ color: tint, size }) => (
-            <Ionicons name="stats-chart" size={size} color={tint} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: 'Settings',
-          tabBarIcon: ({ color: tint, size }) => (
-            <Ionicons name="settings-sharp" size={size} color={tint} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: t('nav.home') }} />
+      <Tabs.Screen name="progress" options={{ title: t('nav.progress') }} />
+      <Tabs.Screen name="settings" options={{ title: t('nav.settings') }} />
     </Tabs>
   );
 }

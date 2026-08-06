@@ -83,34 +83,14 @@ export class ApiError extends Error {
     return this.status === 429;
   }
 
-  /** Copy suitable for showing a user directly. */
-  get userMessage(): string {
-    // A rate-limit message without a duration is actively unhelpful — the user
-    // has no idea whether to wait ten seconds or an hour, so they retry
-    // immediately and stay blocked.
-    if (this.isRateLimited && this.retryAfterSeconds) {
-      return `Too many attempts. Try again in ${formatWait(this.retryAfterSeconds)}.`;
-    }
-    if (this.detail) return this.detail;
-
-    switch (this.kind) {
-      case 'timeout':
-        return 'The server took too long to respond. Check your connection and try again.';
-      case 'network':
-        return 'Could not reach the server. Check your connection and try again.';
-      case 'parse':
-        return 'The server sent something unexpected. Try again in a moment.';
-      default:
-        return 'Something went wrong on the server. Try again in a moment.';
-    }
-  }
 }
 
-function formatWait(seconds: number): string {
-  if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'}`;
-  const minutes = Math.ceil(seconds / 60);
-  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
-}
+// There used to be a `userMessage` getter here, returning English copy for each
+// `kind`. It has moved to `api/errors.ts` as `apiErrorMessage(t, caught,
+// fallback)`, because a class constructed in a fetch wrapper has no access to
+// the dictionary — so every screen translated its *fallback* while the message
+// that actually appeared most of the time stayed English regardless of the
+// language the user had chosen.
 
 /* -------------------------------------------------------------------------- */
 /* Auth wiring                                                                */

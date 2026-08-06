@@ -3,6 +3,9 @@
 Split in two: unit tests of the counter, where time can be controlled precisely,
 and endpoint tests proving the limits are actually wired up. The second kind is
 what catches a limit that exists but was never attached to a route.
+
+The Redis-backed counter is tested separately, in `test_rate_limit_redis.py` —
+it needs a server, and these must not.
 """
 
 import time
@@ -13,89 +16,89 @@ from fastapi.testclient import TestClient
 from app.core.rate_limit import (
     LOGIN_ACCOUNT_MAX_ATTEMPTS,
     LOGIN_ACCOUNT_WINDOW_SECONDS,
-    SlidingWindowCounter,
     clear_failures,
     is_blocked,
     record_failure,
 )
+from app.core.rate_limit_store import MemoryStore
 
 # --------------------------------------------------------------------------- #
 # The counter
 # --------------------------------------------------------------------------- #
 
 
-def test_allows_up_to_the_limit() -> None:
-    counter = SlidingWindowCounter()
+async def test_allows_up_to_the_limit() -> None:
+    counter = MemoryStore()
     for _ in range(5):
-        assert counter.hit("k", limit=5, window_seconds=60) is None
+        assert await counter.hit("k", limit=5, window_seconds=60) is None
 
 
-def test_blocks_past_the_limit() -> None:
-    counter = SlidingWindowCounter()
+async def test_blocks_past_the_limit() -> None:
+    counter = MemoryStore()
     for _ in range(5):
-        counter.hit("k", limit=5, window_seconds=60)
+        await counter.hit("k", limit=5, window_seconds=60)
 
-    retry_after = counter.hit("k", limit=5, window_seconds=60)
+    retry_after = await counter.hit("k", limit=5, window_seconds=60)
     assert retry_after is not None
     assert 0 < retry_after <= 60
 
 
-def test_keys_are_independent() -> None:
+async def test_keys_are_independent() -> None:
     """One address hitting its limit must not lock everyone else out."""
-    counter = SlidingWindowCounter()
+    counter = MemoryStore()
     for _ in range(5):
-        counter.hit("attacker", limit=5, window_seconds=60)
+        await counter.hit("attacker", limit=5, window_seconds=60)
 
-    assert counter.hit("attacker", limit=5, window_seconds=60) is not None
-    assert counter.hit("someone-else", limit=5, window_seconds=60) is None
+    assert await counter.hit("attacker", limit=5, window_seconds=60) is not None
+    assert await counter.hit("someone-else", limit=5, window_seconds=60) is None
 
 
-def test_window_slides() -> None:
+async def test_window_slides() -> None:
     """Attempts age out, so a limit is a rate and not a lifetime cap."""
-    counter = SlidingWindowCounter()
+    counter = MemoryStore()
     for _ in range(3):
-        counter.hit("k", limit=3, window_seconds=0.15)
-    assert counter.hit("k", limit=3, window_seconds=0.15) is not None
+        await counter.hit("k", limit=3, window_seconds=0.15)
+    assert await counter.hit("k", limit=3, window_seconds=0.15) is not None
 
     time.sleep(0.2)
-    assert counter.hit("k", limit=3, window_seconds=0.15) is None
+    assert await counter.hit("k", limit=3, window_seconds=0.15) is None
 
 
-def test_sliding_window_has_no_boundary_burst() -> None:
+async def test_sliding_window_has_no_boundary_burst() -> None:
     """The reason this is a log rather than a fixed-window counter.
 
     A fixed window resets on a calendar boundary, letting an attacker send the
     full budget just before it and again just after — twice the intended rate.
     Here the oldest attempt has to genuinely age out.
     """
-    counter = SlidingWindowCounter()
+    counter = MemoryStore()
     for _ in range(3):
-        counter.hit("k", limit=3, window_seconds=0.3)
+        await counter.hit("k", limit=3, window_seconds=0.3)
 
     time.sleep(0.15)  # half the window
-    assert counter.hit("k", limit=3, window_seconds=0.3) is not None
+    assert await counter.hit("k", limit=3, window_seconds=0.3) is not None
 
 
-def test_peek_does_not_consume_budget() -> None:
+async def test_peek_does_not_consume_budget() -> None:
     """Checking whether a key is blocked must not itself block it."""
-    counter = SlidingWindowCounter()
-    counter.hit("k", limit=2, window_seconds=60)
+    counter = MemoryStore()
+    await counter.hit("k", limit=2, window_seconds=60)
 
     for _ in range(10):
-        assert counter.peek("k", limit=2, window_seconds=60) is None
+        assert await counter.peek("k", limit=2, window_seconds=60) is None
 
-    assert counter.hit("k", limit=2, window_seconds=60) is None
-    assert counter.hit("k", limit=2, window_seconds=60) is not None
+    assert await counter.hit("k", limit=2, window_seconds=60) is None
+    assert await counter.hit("k", limit=2, window_seconds=60) is not None
 
 
-def test_reset_clears_a_key() -> None:
-    counter = SlidingWindowCounter()
+async def test_reset_clears_a_key() -> None:
+    counter = MemoryStore()
     for _ in range(3):
-        counter.hit("k", limit=3, window_seconds=60)
-    assert counter.hit("k", limit=3, window_seconds=60) is not None
+        await counter.hit("k", limit=3, window_seconds=60)
+    assert await counter.hit("k", limit=3, window_seconds=60) is not None
 
-    counter.reset("k")
-    assert counter.hit("k", limit=3, window_seconds=60) is None
+    await counter.reset("k")
+    assert await counter.hit("k", limit=3, window_seconds=60) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -139,7 +142,7 @@ def test_rate_limited_response_says_how_long_to_wait(client: TestClient) -> None
 
 
 @pytest.mark.usefixtures("rate_limited")
-def test_successful_login_clears_the_account_counter() -> None:
+async def test_successful_login_clears_the_account_counter() -> None:
     """Limits punish failure, not use.
 
     Without the reset, someone who mistypes a few times and then signs in
@@ -155,15 +158,15 @@ def test_successful_login_clears_the_account_counter() -> None:
     limits = {"times": LOGIN_ACCOUNT_MAX_ATTEMPTS, "seconds": LOGIN_ACCOUNT_WINDOW_SECONDS}
 
     for _ in range(LOGIN_ACCOUNT_MAX_ATTEMPTS):
-        record_failure("login-account", account, **limits)
-    assert is_blocked("login-account", account, **limits) is not None
+        await record_failure("login-account", account, **limits)
+    assert await is_blocked("login-account", account, **limits) is not None
 
-    clear_failures("login-account", account)
-    assert is_blocked("login-account", account, **limits) is None
+    await clear_failures("login-account", account)
+    assert await is_blocked("login-account", account, **limits) is None
 
 
 @pytest.mark.usefixtures("rate_limited")
-def test_account_limit_is_case_insensitive() -> None:
+async def test_account_limit_is_case_insensitive() -> None:
     """Emails are case-insensitive in the database, so the counter must match.
 
     Otherwise an attacker cycles Target@x.com, TARGET@x.com, tArGeT@x.com and
@@ -172,9 +175,9 @@ def test_account_limit_is_case_insensitive() -> None:
     limits = {"times": LOGIN_ACCOUNT_MAX_ATTEMPTS, "seconds": LOGIN_ACCOUNT_WINDOW_SECONDS}
 
     for _ in range(LOGIN_ACCOUNT_MAX_ATTEMPTS):
-        record_failure("login-account", "Target@Example.com", **limits)
+        await record_failure("login-account", "Target@Example.com", **limits)
 
-    assert is_blocked("login-account", "target@example.com", **limits) is not None
+    assert await is_blocked("login-account", "target@example.com", **limits) is not None
 
 
 @pytest.mark.usefixtures("rate_limited")

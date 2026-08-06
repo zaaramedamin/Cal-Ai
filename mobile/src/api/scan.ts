@@ -70,3 +70,19 @@ export function scanMeal(input: {
     },
   });
 }
+
+/**
+ * Identify foods from a written description instead of a photograph.
+ *
+ * Same response shape, and on the server the same matching pipeline — USDA
+ * first, the cache second, an AI estimate only if both fail. Text is a different
+ * way in, not a shortcut past the part that keeps the numbers honest.
+ */
+export function describeMeal(description: string): Promise<ScanResponse> {
+  return apiRequest<ScanResponse>('/api/v1/scan/describe', {
+    method: 'POST',
+    authenticated: true,
+    timeoutMs: SCAN_TIMEOUT_MS,
+    body: { description },
+  });
+}

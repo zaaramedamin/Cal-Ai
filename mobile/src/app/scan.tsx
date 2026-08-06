@@ -26,10 +26,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
 import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import {
   type FoodSearchResult,
 
@@ -37,7 +39,7 @@ import {
   type MealSlot,
   logFood,
 } from '@/api/diary';
-import { type ScannedItem, isEstimate, scanMeal } from '@/api/scan';
+import { type ScannedItem, describeMeal, isEstimate, scanMeal } from '@/api/scan';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { Screen } from '@/components/screen';
@@ -45,7 +47,7 @@ import { TextField } from '@/components/text-field';
 import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, cardShadow, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
-import { useT } from '@/i18n';
+import { type Translate, useT } from '@/i18n';
 
 /**
  * Longest edge of the uploaded image.
@@ -75,15 +77,15 @@ interface ReviewItem {
 type State =
   | { kind: 'idle' }
   | { kind: 'preparing' }
-  | { kind: 'analyzing'; preview: string }
+  | { kind: 'analyzing'; preview?: string }
   | {
       kind: 'review';
-      preview: string;
+      preview?: string;
       items: ReviewItem[];
       notes: string;
       estimatedCount: number;
     }
-  | { kind: 'nothing'; preview: string; notes: string }
+  | { kind: 'nothing'; preview?: string; notes: string }
   | { kind: 'error'; title: string; message: string };
 
 function toReviewItems(items: ScannedItem[]): ReviewItem[] {
@@ -124,12 +126,12 @@ export default function ScanScreen() {
     if (!permission.granted) {
       setState({
         kind: 'error',
-        title: source === 'camera' ? 'Camera access is off' : 'Photo access is off',
+        title: source === 'camera' ? t('scan.cameraOff') : t('scan.photosOff'),
         // `canAskAgain: false` means the OS will no longer show the dialog, so
         // telling the user to "allow it next time" would be a dead end.
         message: permission.canAskAgain
-          ? 'Cal Ai needs permission to read the photo so it can identify the food in it.'
-          : 'Turn it back on in your device Settings under Cal Ai, then try again.',
+          ? t('scan.permissionAsk')
+          : t('scan.permissionBlocked'),
       });
       return;
     }
@@ -165,8 +167,8 @@ export default function ScanScreen() {
     } catch {
       setState({
         kind: 'error',
-        title: 'Could not read that photo',
-        message: 'Try taking it again, or pick a different one from your library.',
+        title: t('scan.badPhoto'),
+        message: t('scan.badPhotoBody'),
       });
       return;
     }
@@ -191,7 +193,30 @@ export default function ScanScreen() {
         estimatedCount: response.estimated_count,
       });
     } catch (caught) {
-      setState({ kind: 'error', ...describeScanFailure(caught) });
+      setState({ kind: 'error', ...describeScanFailure(t, caught) });
+    }
+  }
+
+  async function describe(description: string) {
+    setState({ kind: 'analyzing' });
+
+    try {
+      const response = await describeMeal(description);
+      if (response.items.length === 0) {
+        setState({ kind: 'nothing', notes: response.notes });
+        return;
+      }
+      setState({
+        kind: 'review',
+        items: toReviewItems(response.items),
+        notes: response.notes,
+        estimatedCount: response.estimated_count,
+      });
+    } catch (caught) {
+      // The same mapper as the photo path — both spend the same Gemini budget,
+      // so both need the same quota message — but told which input it was, so
+      // the wording matches what the user actually did.
+      setState({ kind: 'error', ...describeScanFailure(t, caught, 'text') });
     }
   }
 
@@ -231,11 +256,9 @@ export default function ScanScreen() {
     } catch (caught) {
       setState({
         kind: 'error',
-        title: 'Could not log everything',
+        title: t('scan.logPartial'),
         message:
-          caught instanceof ApiError
-            ? caught.userMessage
-            : 'Some items may have been saved. Check your diary before retrying.',
+          apiErrorMessage(t, caught, 'scan.logPartialBody'),
       });
     } finally {
       setLogging(false);
@@ -245,26 +268,37 @@ export default function ScanScreen() {
   return (
     <Screen>
       <View style={styles.header}>
-        <Text style={text.overline}>Scan a meal</Text>
+        <Text style={text.overline}>{t('scan.eyebrow')}</Text>
         <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancel}>
-          <Text style={styles.cancelLabel}>Cancel</Text>
+          <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
         </Pressable>
       </View>
 
-      {state.kind === 'idle' && <ChoosePhoto onChoose={(source) => void choosePhoto(source)} />}
+      {state.kind === 'idle' && (
+        <ChoosePhoto
+          onChoose={(source) => void choosePhoto(source)}
+          onDescribe={(value) => void describe(value)}
+        />
+      )}
 
-      {state.kind === 'preparing' && <Waiting caption="Opening…" />}
+      {state.kind === 'preparing' && <Waiting caption={t('scan.opening')} />}
 
       {state.kind === 'analyzing' && (
-        <Waiting caption="Looking at your plate…" preview={state.preview} />
+        <Waiting
+          caption={state.preview ? t('scan.lookingPhoto') : t('scan.lookingText')}
+          preview={state.preview}
+        />
       )}
 
       {state.kind === 'nothing' && (
         <Outcome
-          title="No food in this photo"
+          // Which input was used decides which advice is useful. Telling someone
+          // who typed a sentence to improve their lighting is the kind of stock
+          // message that makes an app feel like it is not listening.
+          title={state.preview ? t('scan.noFoodPhoto') : t('scan.noFoodText')}
           body={
             state.notes ||
-            'Try again with the plate filling more of the frame, in decent light.'
+            (state.preview ? t('scan.noFoodPhotoBody') : t('scan.noFoodTextBody'))
           }
           preview={state.preview}
           onRetry={() => setState({ kind: 'idle' })}
@@ -298,16 +332,22 @@ export default function ScanScreen() {
 /* Phases                                                                     */
 /* -------------------------------------------------------------------------- */
 
-function ChoosePhoto({ onChoose }: { onChoose: (source: 'camera' | 'library') => void }) {
+function ChoosePhoto({
+  onChoose,
+  onDescribe,
+}: {
+  onChoose: (source: 'camera' | 'library') => void;
+  onDescribe: (description: string) => void;
+}) {
+  const t = useT();
+  const [description, setDescription] = useState('');
+  const ready = description.trim().length >= 3;
+
   return (
     <ScrollView contentContainerStyle={styles.choose} showsVerticalScrollIndicator={false}>
       <View style={styles.chooseIntro}>
-        <Text style={text.title}>Photograph your meal</Text>
-        <Text style={[text.bodyMuted, styles.chooseBody]}>
-          Cal Ai identifies the foods and estimates portion sizes. You confirm both before
-          anything is logged — and the nutrition itself always comes from USDA, never from
-          the photo.
-        </Text>
+        <Text style={text.title}>{t('scan.title')}</Text>
+        <Text style={[text.bodyMuted, styles.chooseBody]}>{t('scan.intro')}</Text>
       </View>
 
       <Pressable
@@ -317,8 +357,8 @@ function ChoosePhoto({ onChoose }: { onChoose: (source: 'camera' | 'library') =>
       >
         <Ionicons name="camera" size={26} color={color.onDark} />
         <View style={styles.sourceText}>
-          <Text style={styles.sourceTitleOnDark}>Take a photo</Text>
-          <Text style={styles.sourceHintOnDark}>Fill the frame with the plate</Text>
+          <Text style={styles.sourceTitleOnDark}>{t('scan.takePhoto')}</Text>
+          <Text style={styles.sourceHintOnDark}>{t('scan.takePhotoHint')}</Text>
         </View>
       </Pressable>
 
@@ -329,22 +369,62 @@ function ChoosePhoto({ onChoose }: { onChoose: (source: 'camera' | 'library') =>
       >
         <Ionicons name="images-outline" size={26} color={color.ink} />
         <View style={styles.sourceText}>
-          <Text style={styles.sourceTitle}>Choose from library</Text>
-          <Text style={styles.sourceHint}>A photo you already took</Text>
+          <Text style={styles.sourceTitle}>{t('scan.fromLibrary')}</Text>
+          <Text style={styles.sourceHint}>{t('scan.fromLibraryHint')}</Text>
         </View>
       </Pressable>
+
+      {/* The written route. Not hidden behind a tab: a photograph is the better
+          input when there is a plate in front of you, and typing is the better
+          one when there is not — a sandwich already eaten, a meal out, a recipe
+          you know by heart. Neither is the fallback. */}
+      <View style={styles.describeBlock}>
+        <Text style={styles.describeLabel}>{t('scan.orDescribe')}</Text>
+        <TextInput
+          value={description}
+          onChangeText={setDescription}
+          placeholder={t('scan.describePlaceholder')}
+          placeholderTextColor={color.inkFaint}
+          style={styles.describeInput}
+          multiline
+          maxLength={500}
+          returnKeyType="go"
+          onSubmitEditing={() => ready && onDescribe(description.trim())}
+        />
+        <Pressable
+          onPress={() => ready && onDescribe(description.trim())}
+          disabled={!ready}
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.describeButton,
+            !ready && styles.describeButtonOff,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Ionicons
+            name="sparkles-outline"
+            size={18}
+            color={ready ? color.onDark : color.inkFaint}
+          />
+          <Text style={[styles.describeButtonText, !ready && styles.describeButtonTextOff]}>
+            {t('scan.identify')}
+          </Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
 
 function Waiting({ caption, preview }: { caption: string; preview?: string }) {
+  const t = useT();
+
   return (
     <View style={styles.centered}>
       {preview && <Image source={{ uri: preview }} style={styles.previewLarge} />}
       <ActivityIndicator color={color.ink} />
       <Text style={[text.bodyMuted, styles.waitingCaption]}>{caption}</Text>
       {preview && (
-        <Text style={styles.waitingSub}>This usually takes a few seconds.</Text>
+        <Text style={styles.waitingSub}>{t('scan.takesSeconds')}</Text>
       )}
     </View>
   );
@@ -361,13 +441,15 @@ function Outcome({
   preview?: string;
   onRetry: () => void;
 }) {
+  const t = useT();
+
   return (
     <View style={styles.centered}>
       {preview && <Image source={{ uri: preview }} style={styles.previewLarge} />}
       <Text style={text.title}>{title}</Text>
       <Text style={[text.bodyMuted, styles.outcomeBody]}>{body}</Text>
       <View style={styles.outcomeAction}>
-        <Button label="Try another photo" onPress={onRetry} />
+        <Button label={t('scan.tryAnother')} onPress={onRetry} />
       </View>
     </View>
   );
@@ -406,7 +488,9 @@ function Review({
     <>
       <ScrollView contentContainerStyle={styles.reviewScroll} showsVerticalScrollIndicator={false}>
         <View style={styles.reviewHead}>
-          <Image source={{ uri: state.preview }} style={styles.previewThumb} />
+          {state.preview && (
+            <Image source={{ uri: state.preview }} style={styles.previewThumb} />
+          )}
           <View style={styles.reviewHeadText}>
             <Text style={text.heading}>
               {state.items.length} item{state.items.length === 1 ? '' : 's'} found
@@ -464,7 +548,7 @@ function Review({
           })}
         </View>
 
-        <Text style={[text.overline, styles.sectionLabel]}>Detected</Text>
+        <Text style={[text.overline, styles.sectionLabel]}>{t('scan.detected')}</Text>
 
         {state.items.map((item) => (
           <ReviewCard
@@ -495,12 +579,19 @@ function Review({
         <View>
           <Text style={styles.footerTotal}>{Math.round(totalKcal).toLocaleString()} kcal</Text>
           <Text style={styles.footerSub}>
-            {loggable.length} of {state.items.length} selected
+            {t('scan.selectedCount', {
+              selected: loggable.length,
+              total: state.items.length,
+            })}
           </Text>
         </View>
         <View style={styles.footerButton}>
           <Button
-            label={loggable.length === 0 ? 'Nothing selected' : `Log ${loggable.length}`}
+            label={
+              loggable.length === 0
+                ? t('scan.nothingSelected')
+                : t('scan.logCount', { count: loggable.length })
+            }
             disabled={loggable.length === 0}
             loading={logging}
             onPress={onLog}
@@ -520,6 +611,7 @@ function ReviewCard({
   onUpdate: (patch: Partial<ReviewItem>) => void;
   onSearch: () => void;
 }) {
+  const t = useT();
   const grams = gramsOf(item);
   const validGrams = grams > 0;
   const kcal = item.match ? (item.match.kcal * grams) / 100 : null;
@@ -556,7 +648,7 @@ function ReviewCard({
               {item.match.name}
             </Text>
           ) : (
-            <Text style={styles.itemNoMatch}>No match in the food database</Text>
+            <Text style={styles.itemNoMatch}>{t('scan.noMatchInDb')}</Text>
           )}
           {estimated && (
             // Deliberately loud, and deliberately attached to the item rather
@@ -570,7 +662,7 @@ function ReviewCard({
           {item.confidence < LOW_CONFIDENCE && (
             <View style={styles.lowConfidence}>
               <Ionicons name="alert-circle-outline" size={13} color={color.carbs} />
-              <Text style={styles.lowConfidenceText}>Low confidence — worth a check</Text>
+              <Text style={styles.lowConfidenceText}>{t('scan.lowConfidence')}</Text>
             </View>
           )}
         </View>
@@ -586,17 +678,17 @@ function ReviewCard({
       {item.match ? (
         <View style={styles.gramsRow}>
           <TextField
-            label="Grams"
+            label={t('scan.grams')}
             value={item.grams}
             onChangeText={(grams) => onUpdate({ grams })}
             keyboardType="decimal-pad"
-            error={validGrams ? null : 'Enter an amount greater than zero.'}
+            error={validGrams ? null : t('food.amountPositive')}
           />
         </View>
       ) : (
         <Pressable onPress={onSearch} accessibilityRole="button" style={styles.searchLink}>
           <Ionicons name="search" size={15} color={color.ink} />
-          <Text style={styles.searchLinkLabel}>Search for it manually</Text>
+          <Text style={styles.searchLinkLabel}>{t('scan.searchManually')}</Text>
         </Pressable>
       )}
     </Card>
@@ -619,20 +711,24 @@ function gramsOf(item: ReviewItem): number {
  * failed" message would leave every one of them stuck: one is the operator's
  * job, one just needs waiting out, one is worth retrying immediately.
  */
-function describeScanFailure(caught: unknown): { title: string; message: string } {
+function describeScanFailure(
+  t: Translate,
+  caught: unknown,
+  input: 'photo' | 'text' = 'photo',
+): { title: string; message: string } {
   if (!(caught instanceof ApiError)) {
     return {
-      title: 'Scan failed',
-      message: 'Something unexpected went wrong. Try again in a moment.',
+      title: input === 'photo' ? t('scan.failedPhoto') : t('scan.failedText'),
+      message: t('scan.failedBody'),
     };
   }
 
   if (caught.status === 503) {
     return {
-      title: 'Scanning isn’t switched on',
+      title: t('scan.notEnabled'),
       // The backend's 503 detail carries the aistudio.google.com link, which is
       // exactly the actionable part.
-      message: caught.detail ?? 'The server has no AI key configured.',
+      message: caught.detail ?? t('scan.noKey'),
     };
   }
 
@@ -642,15 +738,22 @@ function describeScanFailure(caught: unknown): { title: string; message: string 
       // did. On a shared free-tier key the cap is usually spent by someone else
       // — or by a test run — and the wait is seconds, so the title says so and
       // the server's message carries the actual number.
-      title: 'The AI is busy right now',
+      title: t('scan.busy'),
       // `detail` rather than `userMessage`: the client's generic rate-limit copy
       // would overwrite the server's specific explanation of which cap was hit
       // and how long it lasts.
-      message: caught.detail ?? caught.userMessage,
+      message: caught.detail ?? apiErrorMessage(t, caught, 'error.server'),
     };
   }
 
-  return { title: 'Couldn’t analyse the photo', message: caught.userMessage };
+  // Which input was used decides the wording. "Couldn't analyse the photo" for
+  // someone who typed a sentence is the kind of stock message that makes an app
+  // feel like it is not listening.
+  return {
+    title:
+      input === 'photo' ? t('scan.cantAnalysePhoto') : t('scan.cantIdentify'),
+    message: apiErrorMessage(t, caught, 'error.server'),
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -691,6 +794,30 @@ const styles = StyleSheet.create({
   sourceHintOnDark: { ...text.bodyMuted, fontSize: 12, color: 'rgba(255, 255, 255, 0.65)' },
   pressed: { opacity: 0.85 },
 
+  describeBlock: { marginTop: space.lg, gap: space.sm },
+  describeLabel: { ...text.overline, color: color.inkMuted },
+  describeInput: {
+    ...text.body,
+    minHeight: 84,
+    padding: space.md,
+    borderRadius: radius.md,
+    backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: color.hairline,
+    textAlignVertical: 'top',
+  },
+  describeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    paddingVertical: space.md,
+    borderRadius: radius.md,
+    backgroundColor: color.ink,
+  },
+  describeButtonOff: { backgroundColor: color.wash },
+  describeButtonText: { ...text.label, color: color.onDark },
+  describeButtonTextOff: { color: color.inkFaint },
   previewLarge: {
     width: 200,
     height: 200,

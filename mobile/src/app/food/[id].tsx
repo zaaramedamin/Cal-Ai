@@ -8,11 +8,19 @@
  * should be able to see the difference rather than discover it later.
  */
 
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import {
   type Food,
   MEAL_SLOTS,
@@ -27,7 +35,30 @@ import { TextField } from '@/components/text-field';
 import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
+import { submitFood } from '@/api/review';
 import { useT } from '@/i18n';
+import type { StringKey } from '@/i18n/strings';
+
+/** How each source is named to the user. */
+const SOURCE_LABELS: Record<string, string> = {
+  usda: 'USDA FoodData Central',
+  off: 'Open Food Facts',
+  user: 'You',
+  ai_estimate: 'AI estimate',
+};
+
+/**
+ * What kind of claim each source is making.
+ *
+ * Only the ones that need qualifying carry a line. USDA does not: it is the
+ * baseline this app is built on, and putting a caveat under everything trains
+ * people to read none of them.
+ */
+const SOURCE_CAVEATS: Record<string, StringKey | undefined> = {
+  off: 'food.sourceOff',
+  user: 'food.sourceUser',
+  ai_estimate: 'food.sourceEstimate',
+};
 
 export default function FoodDetailScreen() {
   const router = useRouter();
@@ -45,6 +76,21 @@ export default function FoodDetailScreen() {
   // The + button infers a slot from the time of day; this is where the user
   // corrects it. State starts from the param and the chips below override.
   const [chosenSlot, setChosenSlot] = useState<MealSlot>(slot ?? 'snack');
+  const [sharing, setSharing] = useState(false);
+  const [shared, setShared] = useState(false);
+
+  async function share() {
+    if (!food || sharing || shared) return;
+    setSharing(true);
+    try {
+      await submitFood(food.id);
+      setShared(true);
+    } catch (caught) {
+      setError(apiErrorMessage(t, caught, 'auth.somethingWrong'));
+    } finally {
+      setSharing(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +104,7 @@ export default function FoodDetailScreen() {
         if (preferred) setGrams(String(Math.round(preferred.grams)));
       } catch (caught) {
         if (!cancelled) {
-          setError(caught instanceof ApiError ? caught.userMessage : 'Could not load this food.');
+          setError(apiErrorMessage(t, caught, 'food.loadFailed'));
         }
       }
     })();
@@ -72,9 +118,17 @@ export default function FoodDetailScreen() {
 
   // Scaled live from the per-100 g values, so the numbers on screen are always
   // the numbers that will be logged.
+  //
+  // **An invalid quantity scales to zero, it does not return null.** This used
+  // to be `if (!food || !valid) return null`, and the guard below treats a null
+  // `scaled` as "still loading" — so clearing the amount field emptied the whole
+  // screen and replaced it with the word "Loading…". Deleting three characters
+  // made the food you were looking at disappear.
+  //
+  // Zero is also the honest number to show: you are about to log nothing.
   const scaled = useMemo(() => {
-    if (!food || !valid) return null;
-    const factor = quantity / 100;
+    if (!food) return null;
+    const factor = valid ? quantity / 100 : 0;
     return {
       kcal: food.kcal * factor,
       protein_g: food.protein_g * factor,
@@ -104,7 +158,7 @@ export default function FoodDetailScreen() {
       router.dismissAll();
       router.replace(HOME);
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.userMessage : 'Could not log this food.');
+      setError(apiErrorMessage(t, caught, 'food.logFailed'));
     } finally {
       setSaving(false);
     }
@@ -114,9 +168,9 @@ export default function FoodDetailScreen() {
     return (
       <Screen>
         <View style={styles.centered}>
-          <Text style={text.title}>Couldn&apos;t load this food</Text>
+          <Text style={text.title}>{t('food.cantLoad')}</Text>
           <Text style={[text.bodyMuted, styles.errorBody]}>{error}</Text>
-          <Button label="Go back" onPress={() => router.back()} />
+          <Button label={t('common.back')} onPress={() => router.back()} />
         </View>
       </Screen>
     );
@@ -125,8 +179,12 @@ export default function FoodDetailScreen() {
   if (!food || !scaled) {
     return (
       <Screen>
-        <View style={styles.centered}>
-          <Text style={text.bodyMuted}>Loading…</Text>
+        {/* Centred properly: `flex: 1` on the wrapper plus `justifyContent`,
+            rather than relying on whatever height the content happened to have.
+            The spinner used to sit just under the status bar. */}
+        <View style={styles.loading}>
+          <ActivityIndicator color={color.ink} />
+          <Text style={[text.bodyMuted, styles.loadingLabel]}>{t('common.loading')}</Text>
         </View>
       </Screen>
     );
@@ -141,16 +199,28 @@ export default function FoodDetailScreen() {
         <Text style={text.title}>{food.name}</Text>
         {food.brand && <Text style={[text.bodyMuted, styles.brand]}>{food.brand}</Text>}
 
+        {/* A withdrawn food is still reachable — a diary entry logged before the
+            withdrawal has to render — so the screen says what happened instead
+            of looking normal. `withdrawn_reason` is the admin's words. */}
+        {food.withdrawn_reason !== null && (
+          <View style={styles.withdrawn} accessibilityRole="alert">
+            <View style={styles.withdrawnHead}>
+              <Ionicons name="alert-circle" size={16} color={color.danger} />
+              <Text style={styles.withdrawnTitle}>{t('food.withdrawn')}</Text>
+            </View>
+            <Text style={styles.withdrawnBody}>{t('food.withdrawnBody')}</Text>
+            <Text style={styles.withdrawnBody}>{food.withdrawn_reason}</Text>
+          </View>
+        )}
+
         <View style={styles.heroBlock}>
           <Text style={text.hero}>{Math.round(scaled.kcal).toLocaleString()}</Text>
-          <Text style={text.overline}>
-            kcal for {quantity} {unit}
-          </Text>
+          <Text style={text.overline}>{t('food.kcalFor', { amount: quantity, unit })}</Text>
         </View>
 
         <MacroBar macros={scaled} scale="hero" showLegend />
 
-        <Text style={[text.overline, styles.sectionLabel]}>Meal</Text>
+        <Text style={[text.overline, styles.sectionLabel]}>{t('food.mealSection')}</Text>
         <View style={styles.slotRow}>
           {MEAL_SLOTS.map((option) => {
             const selected = option === chosenSlot;
@@ -170,13 +240,13 @@ export default function FoodDetailScreen() {
           })}
         </View>
 
-        <Text style={[text.overline, styles.sectionLabel]}>Quantity</Text>
+        <Text style={[text.overline, styles.sectionLabel]}>{t('food.quantitySection')}</Text>
         <TextField
-          label={`Amount in ${unit}`}
+          label={t('food.amountIn', { unit })}
           value={grams}
           onChangeText={setGrams}
           keyboardType="decimal-pad"
-          error={valid ? null : 'Enter an amount greater than zero.'}
+          error={valid ? null : t('food.amountPositive')}
         />
 
         {food.portions.length > 0 && (
@@ -201,26 +271,66 @@ export default function FoodDetailScreen() {
           </View>
         )}
 
-        <Text style={[text.overline, styles.sectionLabel]}>Full nutrition</Text>
+        <Text style={[text.overline, styles.sectionLabel]}>{t('nutrient.full')}</Text>
         <View style={styles.table}>
-          <NutrientRow label="Protein" value={scaled.protein_g} unit="g" />
-          <NutrientRow label="Carbohydrate" value={scaled.carbs_g} unit="g" />
-          <NutrientRow label="of which sugars" value={scaled.sugars_g} unit="g" indented />
-          <NutrientRow label="Fat" value={scaled.fat_g} unit="g" />
+          <NutrientRow label={t('nutrient.protein')} value={scaled.protein_g} unit="g" />
+          <NutrientRow label={t('nutrient.carbs')} value={scaled.carbs_g} unit="g" />
+          <NutrientRow label={t('nutrient.sugars')} value={scaled.sugars_g} unit="g" indented />
+          <NutrientRow label={t('nutrient.fat')} value={scaled.fat_g} unit="g" />
           <NutrientRow
-            label="of which saturates"
+            label={t('nutrient.saturates')}
             value={scaled.saturated_fat_g}
             unit="g"
             indented
           />
-          <NutrientRow label="Fibre" value={scaled.fibre_g} unit="g" />
-          <NutrientRow label="Sodium" value={scaled.sodium_mg} unit="mg" />
+          <NutrientRow label={t('nutrient.fibre')} value={scaled.fibre_g} unit="g" />
+          <NutrientRow label={t('nutrient.sodium')} value={scaled.sodium_mg} unit="mg" />
         </View>
 
-        <Text style={styles.source}>
-          Source: {food.source === 'usda' ? 'USDA FoodData Central' : food.source} ·{' '}
-          {food.source_id}
-        </Text>
+        {/* Only for a food you wrote that is not already shared. `source` is
+            the check rather than a flag on the response: a food from USDA or
+            Open Food Facts is not yours to offer, and one already approved has
+            nothing to offer. */}
+        {food.source === 'user' && (
+          <View style={styles.shareBlock}>
+            <Text style={text.label}>{t('submit.share')}</Text>
+            <Text style={styles.shareBody}>{t('submit.shareBody')}</Text>
+            <Button
+              label={shared ? t('submit.sent') : t('submit.share')}
+              onPress={() => void share()}
+              loading={sharing}
+              disabled={shared}
+            />
+          </View>
+        )}
+
+        {/* Named, and characterised. "USDA" and "Open Food Facts" are not the
+            same kind of claim — one is lab analysis, the other is a volunteer
+            reading a label — and a user who can see which is which can weigh
+            them differently. Printing a bare source id told them nothing. */}
+        <View style={styles.sourceBlock}>
+          <Text style={styles.source}>
+            {t('food.source')}: {SOURCE_LABELS[food.source] ?? food.source}
+            {food.source_id.startsWith('user:') ? '' : ` · ${food.source_id}`}
+          </Text>
+          {SOURCE_CAVEATS[food.source] && (
+            <Text style={styles.sourceCaveat}>{t(SOURCE_CAVEATS[food.source]!)}</Text>
+          )}
+        </View>
+
+        {/* Reporting sits directly under the source, which is where it belongs:
+            the source line is the claim, and this is how you dispute it. Every
+            food gets the link, including USDA and Open Food Facts rows — those
+            are the ones most worth reporting, because nobody here typed them and
+            nobody here has ever checked them. */}
+        <Pressable
+          onPress={() => router.push({ pathname: '/report/[id]', params: { id: food.id } })}
+          accessibilityRole="button"
+          style={styles.reportLink}
+        >
+          <Ionicons name="flag-outline" size={15} color={color.inkMuted} />
+          <Text style={styles.reportLabel}>{t('report.link')}</Text>
+        </Pressable>
 
         {error && (
           <View style={styles.callout} accessibilityRole="alert">
@@ -230,7 +340,7 @@ export default function FoodDetailScreen() {
 
         <View style={styles.actions}>
           <Button
-            label={`Log ${quantity || 0} ${unit}`}
+            label={t('food.logAmount', { amount: quantity || 0, unit })}
             disabled={!valid}
             loading={saving}
             onPress={() => void handleLog()}
@@ -265,11 +375,39 @@ function NutrientRow({
 }
 
 const styles = StyleSheet.create({
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm },
+  loadingLabel: { marginTop: space.xs },
+
+  reportLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    alignSelf: 'flex-start',
+    minHeight: HIT_SLOP_MIN,
+    paddingVertical: space.sm,
+  },
+  reportLabel: { ...text.bodyMuted, fontSize: 13, textDecorationLine: 'underline' },
+
+  withdrawn: {
+    marginTop: space.md,
+    padding: space.md,
+    gap: space.xs,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(200, 62, 46, 0.08)',
+    borderLeftWidth: 3,
+    borderLeftColor: color.danger,
+  },
+  withdrawnHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  withdrawnTitle: { ...text.label, fontSize: 13, color: color.danger },
+  withdrawnBody: { ...text.body, fontSize: 13, lineHeight: 19 },
+
   content: { paddingBottom: space.xxl },
   centered: { flex: 1, justifyContent: 'center', gap: space.md },
   errorBody: { marginBottom: space.lg },
   brand: { marginTop: space.xs },
-  heroBlock: { marginTop: space.lg, marginBottom: space.lg },
+  // The 44pt number needs air on both sides or it crowds the food name
+  // above it and the macro bar below.
+  heroBlock: { marginTop: space.xl, marginBottom: space.xl },
   sectionLabel: { marginTop: space.xl, marginBottom: space.sm },
   slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   slotChip: {
@@ -315,7 +453,17 @@ const styles = StyleSheet.create({
   tableLabel: { ...text.body, fontSize: 14 },
   tableLabelIndented: { paddingLeft: space.md, color: color.inkMuted, fontSize: 13 },
   tableValue: { ...text.numeric, fontSize: 14 },
-  source: { ...text.bodyMuted, fontSize: 11, marginTop: space.md },
+  shareBlock: {
+    marginTop: space.xl,
+    padding: space.lg,
+    borderRadius: radius.md,
+    backgroundColor: color.accentTint,
+    gap: space.sm,
+  },
+  shareBody: { ...text.bodyMuted, fontSize: 12, lineHeight: 18 },
+  sourceBlock: { marginTop: space.md, gap: space.xs },
+  source: { ...text.bodyMuted, fontSize: 11 },
+  sourceCaveat: { ...text.bodyMuted, fontSize: 11, lineHeight: 16, fontStyle: 'italic' },
   callout: {
     marginTop: space.lg,
     padding: space.md,

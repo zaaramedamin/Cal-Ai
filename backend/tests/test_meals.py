@@ -2,6 +2,10 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
+
+from app.db.models.food import Food
 
 PROFILE = {
     "sex": "male",
@@ -216,25 +220,50 @@ def test_deleting_a_meal_does_not_delete_its_history(client: TestClient, catalog
     assert day["totals"]["kcal"] == pytest.approx(300.08, abs=0.01)
 
 
-async def test_a_retired_ingredient_is_reported_not_silently_dropped(
-    client: TestClient, catalogue, mongo
+async def test_an_ingredient_a_meal_needs_cannot_be_deleted(
+    client: TestClient, catalogue, session
 ) -> None:
-    """Mongo has no foreign keys, so this is the case Postgres used to prevent.
+    """The guarantee that replaced `missing_slugs`.
 
-    Silently dropping the ingredient would make the meal's calories quietly fall;
-    failing the read would make the meal unopenable. Reporting it lets the app say
-    which ingredient went missing.
+    Under MongoDB a food could vanish from beneath a meal, so the API had to
+    report which ingredient had gone and the meal's calories quietly fell. The
+    foreign key makes that unrepresentable: `ON DELETE RESTRICT` means the
+    database refuses the delete instead, so a meal can never silently
+    under-report.
+
+    This is the whole reason for moving back to one relational database, so it is
+    worth a test that exercises the constraint itself rather than trusting the
+    schema to say what it means.
+    """
+    headers = onboarded(client)
+    client.post("/api/v1/meals", json=BREAKFAST, headers=headers)
+
+    milk = (
+        await session.execute(select(Food).where(Food.slug == "milk"))
+    ).scalar_one()
+
+    with pytest.raises(IntegrityError):
+        await session.execute(delete(Food).where(Food.id == milk.id))
+        await session.flush()
+
+    await session.rollback()
+
+
+async def test_a_meal_reports_no_missing_ingredients(
+    client: TestClient, catalogue
+) -> None:
+    """`missing_slugs` survives in the response but is now always empty.
+
+    Kept so the mobile app's parsing does not change; asserted so nobody
+    "restores" the old behaviour by reintroducing a nullable reference.
     """
     headers = onboarded(client)
     meal_id = client.post("/api/v1/meals", json=BREAKFAST, headers=headers).json()["id"]
 
-    await mongo["food_items"].delete_one({"slug": "milk"})
-
     meal = client.get(f"/api/v1/meals/{meal_id}", headers=headers).json()
 
-    assert meal["missing_slugs"] == ["milk"]
-    assert len(meal["items"]) == 1
-    assert meal["totals"]["kcal"] == 143.0
+    assert meal["missing_slugs"] == []
+    assert len(meal["items"]) == 2
 
 
 def test_meals_require_authentication(client: TestClient) -> None:

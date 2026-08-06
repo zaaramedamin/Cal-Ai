@@ -8,21 +8,84 @@ does not spend part of a shared, finite budget.
 
 import logging
 import re
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Integer, case, func, select
+from sqlalchemy import Integer, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.food import Food, FoodPortion, FoodSource
+from app.db.models.food import Food, FoodKind, FoodPortion, FoodSource, ReviewStatus
 from app.services.usda import UnusableFood, UsdaClient, UsdaUnavailable, normalise_food
 
 logger = logging.getLogger(__name__)
 
 #: Below this many local hits we ask USDA as well. A search returning three
 #: cached foods is probably missing better matches; one returning twenty is not.
+#:
+#: Applies to `search_foods` — the *resolver*, used by photo scanning. The
+#: browse search below deliberately does not top up from USDA.
 LOCAL_RESULT_THRESHOLD = 8
+
+#: How the browse search ranks a food, before its name is even scored.
+#:
+#: Lower is better, and the order is the app's answer to "what is this for". A
+#: hand-curated food with a photograph and a French name beats a Tunisian table
+#: entry, which beats your own foods, which beat the French table, which beats a
+#: raw USDA row that nobody here has ever looked at.
+#:
+#: This exists because USDA writes names for a database rather than for a person
+#: — a grilled chicken breast is filed as "Chicken, broilers or fryers, breast,
+#: meat only, cooked, roasted" — and twenty-five of those is the wall of text
+#: this app is trying not to be.
+
+#: Tiers a browsing user sees without qualification. Anything above this — USDA
+#: and Open Food Facts — is a fallback, not a result.
+CURATED_TIERS = 3
+REFERENCE_TIER = 4
+
+SEARCH_TIER = case(
+    (Food.kind == FoodKind.CATALOGUE, 0),
+    (Food.source == FoodSource.INNTA, 1),
+    (Food.owner_id.is_not(None), 2),
+    (Food.source == FoodSource.CIQUAL, 3),
+    else_=REFERENCE_TIER,
+)
+
+#: How many raw database rows to offer when nothing curated matches.
+#:
+#: Two, not twenty. The point is to answer "we have something, but it is not one
+#: of ours" without turning the screen back into the list this change removed.
+FALLBACK_LIMIT = 2
+
+#: USDA name segments that carry no meaning for somebody logging lunch.
+#:
+#: USDA names are `HeadNoun, qualifier, qualifier, …` and the qualifiers are
+#: written for a food scientist. Dropping the ones that describe *sampling*
+#: rather than *food* turns "Chicken, broilers or fryers, breast, meat only,
+#: cooked, roasted" into "Chicken, breast, cooked, roasted".
+#:
+#: Only the name is touched. No number, no source, no id — provenance is
+#: unchanged and the original is still one lookup away by `source_id`.
+NAME_NOISE = frozenset(
+    {
+        "broilers or fryers",
+        "all classes",
+        "meat only",
+        "meat and skin",
+        "composite of trimmed retail cuts",
+        "separable lean only",
+        "separable lean and fat",
+        "trimmed to 1/8 fat",
+        "trimmed to 0 fat",
+        "raw or unprepared",
+        "unprepared",
+        "includes usda commodity food a099",
+        "commercially prepared",
+        "nfs",
+    }
+)
 
 #: Words that carry no matching signal. Deliberately tiny — it holds only
 #: grammatical filler, not cooking methods. "raw", "cooked" and "roasted" all
@@ -43,7 +106,15 @@ def tokenise(query: str) -> list[str]:
     return sorted(set(words), key=len, reverse=True)[:6]
 
 
-async def search_local(session: AsyncSession, query: str, limit: int) -> list[Food]:
+async def search_local(
+    session: AsyncSession,
+    query: str,
+    limit: int,
+    owner_id: uuid.UUID | None,
+    *,
+    max_tier: int | None = None,
+    min_tier: int | None = None,
+) -> list[Food]:
     """Search cached foods, ranked by how many query words a name contains.
 
     **Why not a single ILIKE on the whole phrase, which is what this used to do.**
@@ -79,18 +150,76 @@ async def search_local(session: AsyncSession, query: str, limit: int) -> list[Fo
     )
     score = sum([*matches, *heads], start=func.cast(0, Integer))
 
+    # noqa comments, not a rewrite: ruff reads an upper-case name on the left as
+    # a constant and suggests flipping these. `SEARCH_TIER` is a SQL expression,
+    # and `max_tier >= SEARCH_TIER` reads backwards for something whose whole
+    # meaning is "this tier or better".
+    tier_filters = []
+    if max_tier is not None:
+        tier_filters.append(SEARCH_TIER <= max_tier)  # noqa: SIM300
+    if min_tier is not None:
+        tier_filters.append(SEARCH_TIER >= min_tier)  # noqa: SIM300
+
     result = await session.execute(
         select(Food)
+        # Tier before text score. A curated Tunisian food that matches one word
+        # should outrank a USDA row that matches three, because the user is
+        # picking from this list by eye.
+        .where(*tier_filters)
         # AI estimates are never returned by a search. They exist only so a
         # scanned food the databases could not identify still has a row to log
         # against, and they must not leak into a normal food search where the
         # user would have no idea the numbers were not measured.
         .where(Food.source != FoodSource.AI_ESTIMATE)
+        # Three ways a food may be visible:
+        #   - it has no owner (USDA, Open Food Facts, the catalogue)
+        #   - you wrote it
+        #   - a human approved it into the shared database
+        #
+        # Without the owner clause every custom food was searchable by
+        # everybody, which is both a privacy leak and an open door. Approval is
+        # the *only* route by which one user's typing reaches another's search,
+        # and it runs through a person — see api/v1/review.py.
+        .where(
+            or_(
+                Food.owner_id.is_(None),
+                Food.owner_id == owner_id,
+                Food.review_status == ReviewStatus.APPROVED,
+            )
+        )
+        # Withdrawn foods are gone from search but not from the database — see
+        # `Food.withdrawn_at`. A food somebody reported and an admin upheld must
+        # stop being *offered*, while every diary entry already pointing at it
+        # keeps rendering. Excluded here rather than deleted, because deleting
+        # would take that history with it.
+        .where(Food.withdrawn_at.is_(None))
         .where(score > 0)
-        .order_by(score.desc(), func.length(Food.name), Food.name)
+        .order_by(SEARCH_TIER, score.desc(), func.length(Food.name), Food.name)
         .limit(limit)
     )
     return list(result.scalars())
+
+
+def readable_name(name: str) -> str:
+    """A USDA name with its laboratory qualifiers removed.
+
+    `Chicken, broilers or fryers, breast, meat only, cooked, roasted` becomes
+    `Chicken, breast, cooked, roasted`. Segments describing how a sample was
+    prepared or graded go; segments describing the food stay.
+
+    **Renaming, not renumbering.** No nutrition value is touched, `source` and
+    `source_id` are unchanged, and the original name is one lookup away. The
+    rule this project runs on is about inventing *numbers*; a name written for a
+    food scientist is not a fact worth preserving on a phone screen.
+
+    Conservative on purpose: if stripping leaves nothing, the original is
+    returned. A confusing name beats an empty one.
+    """
+    segments = [part.strip() for part in name.split(",")]
+    kept = [s for s in segments if s and s.lower() not in NAME_NOISE]
+    if not kept:
+        return name
+    return ", ".join(kept[:4])
 
 
 def _escape_like(token: str) -> str:
@@ -132,10 +261,33 @@ async def upsert_food(session: AsyncSession, normalised: dict[str, Any]) -> Food
                     "data_fetched_at",
                 )
             },
+            # Never overwrite a curated catalogue row.
+            #
+            # A catalogue food and a searched USDA food can be the same FDC id,
+            # and they deliberately share one row. Without this clause, one
+            # search for "egg" would replace the hand-written "Egg" / "Œuf" with
+            # USDA's "Egg, whole, raw, fresh" — silently, and for every user.
+            # The catalogue's numbers are refreshed explicitly by
+            # `seed-catalogue --force`, never as a side effect of somebody
+            # searching.
+            where=Food.kind != FoodKind.CATALOGUE,
         )
         .returning(Food.id)
     )
-    food_id = (await session.execute(statement)).scalar_one()
+    food_id = (await session.execute(statement)).scalar_one_or_none()
+
+    if food_id is None:
+        # The `where` above filtered the update out, so ON CONFLICT did nothing
+        # and RETURNING gave back no row. That is not an error — it is the
+        # catalogue row being protected — but the caller still needs its id.
+        food_id = (
+            await session.execute(
+                select(Food.id).where(
+                    Food.source == normalised["source"],
+                    Food.source_id == normalised["source_id"],
+                )
+            )
+        ).scalar_one()
 
     if portions:
         existing = await session.execute(
@@ -192,7 +344,12 @@ async def upsert_estimated_food(session: AsyncSession, estimate: Any) -> Food:
 
 
 async def search_foods(
-    session: AsyncSession, query: str, *, limit: int, client: UsdaClient | None = None
+    session: AsyncSession,
+    query: str,
+    *,
+    limit: int,
+    owner_id: uuid.UUID | None = None,
+    client: UsdaClient | None = None,
 ) -> tuple[list[Food], bool]:
     """Search the cache, topping up from USDA when thin.
 
@@ -200,7 +357,7 @@ async def search_foods(
     the user "these are cached results" instead of silently showing a short list
     as though it were complete.
     """
-    local = await search_local(session, query, limit)
+    local = await search_local(session, query, limit, owner_id)
     if len(local) >= LOCAL_RESULT_THRESHOLD:
         return local, False
 
@@ -233,3 +390,60 @@ async def search_foods(
     seen = {food.id for food in merged}
     merged.extend(food for food in local if food.id not in seen)
     return merged[:limit], False
+
+
+async def browse_search(
+    session: AsyncSession,
+    query: str,
+    *,
+    limit: int,
+    owner_id: uuid.UUID | None = None,
+    client: UsdaClient | None = None,
+) -> tuple[list[Food], bool]:
+    """Search as a *person* reads it: curated first, USDA only as a last resort.
+
+    Separate from `search_foods` because the two have different jobs and only
+    look alike. This one produces a short list somebody chooses from by eye.
+    That one resolves a name the photo scanner produced, where the user never
+    sees the candidates — only the numbers attached to the winner. Merging them
+    would mean either hiding USDA from the scanner, which breaks it, or showing
+    USDA to the user, which is the thing being fixed.
+
+    **USDA never appears alongside curated results.** Not ranked below them —
+    absent. A list that is half curated Tunisian food and half laboratory names
+    is still the confusing list, just sorted. Only when nothing curated matches
+    at all does a capped fallback appear, so the answer to a search for
+    "quinoa" is two rows rather than nothing.
+
+    Returns the foods and whether upstream was unreachable, so the app can say
+    "these are cached results" instead of presenting a short list as complete.
+    """
+    curated = await search_local(session, query, limit, owner_id, max_tier=CURATED_TIERS)
+    if curated:
+        return curated, False
+
+    cached_reference = await search_local(
+        session, query, FALLBACK_LIMIT, owner_id, min_tier=REFERENCE_TIER
+    )
+    if cached_reference:
+        return cached_reference, False
+
+    # Nothing at all locally. Ask USDA once, keep at most two, and store what
+    # comes back — the cache is what stops the next person paying for the same
+    # question.
+    usda = client or UsdaClient()
+    try:
+        payloads = await usda.search(query, page_size=FALLBACK_LIMIT)
+    except UsdaUnavailable:
+        logger.warning("USDA unavailable; nothing to offer for %r", query)
+        return [], True
+
+    fetched: list[Food] = []
+    for payload in payloads[:FALLBACK_LIMIT]:
+        try:
+            fetched.append(await upsert_food(session, normalise_food(payload)))
+        except UnusableFood as exc:
+            logger.debug("Skipping unusable USDA food: %s", exc)
+
+    await session.commit()
+    return fetched, False

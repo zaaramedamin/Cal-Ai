@@ -25,7 +25,6 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -37,15 +36,11 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 from app.core.rate_limit import reset_all
-from app.db.mongo import FOOD_ITEMS, MEALS, close_client
 from app.schemas.catalogue import CatalogueFood, Portion, UnitKind
-from app.services.catalogue_photos import PHOTOS
+from app.services.catalogue_seed import _upsert_catalogue_food
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 TEST_DB_NAME = "calai_test"
-#: Same reasoning as the Postgres test database, and the same name for symmetry.
-#: Mongo creates a database on first write, so nothing has to pre-create this.
-TEST_MONGO_DB = "calai_test"
 
 
 def _swap_database(url: str, database: str) -> str:
@@ -57,8 +52,47 @@ def _asyncpg_dsn(url: str) -> str:
     return url.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 
-TEST_DATABASE_URL = _swap_database(get_settings().database_url, TEST_DB_NAME)
-ADMIN_DSN = _asyncpg_dsn(_swap_database(get_settings().database_url, "postgres"))
+#: Hosts the suite is willing to create databases on and truncate tables in.
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "db", "host.docker.internal"})
+
+
+def _test_base_url() -> str:
+    """Where the tests are allowed to run.
+
+    `TEST_DATABASE_URL` wins if set. Otherwise the suite follows `DATABASE_URL`,
+    which is convenient locally and *dangerous* the moment that points somewhere
+    hosted: these fixtures create a database and TRUNCATE tables between every
+    test. Running that against a Supabase project is not a mistake anyone should
+    be able to make by editing one line of `.env`.
+
+    So a non-local host is refused outright rather than guarded by a comment.
+    The check is a host allowlist, not a blocklist — the failure mode of getting
+    an allowlist wrong is a refused test run, and of getting a blocklist wrong is
+    a truncated production table.
+    """
+    explicit = get_settings().test_database_url
+    if explicit:
+        return explicit
+
+    configured = get_settings().database_url
+    host = urlsplit(configured).hostname
+
+    if host not in _LOCAL_HOSTS:
+        raise RuntimeError(
+            f"Refusing to run tests against {host!r}.\n\n"
+            f"DATABASE_URL points at a host this suite does not recognise as "
+            f"local, and these fixtures CREATE a database and TRUNCATE tables "
+            f"between tests.\n\n"
+            f"Set TEST_DATABASE_URL to your local container, e.g.\n"
+            f"  TEST_DATABASE_URL=postgresql+asyncpg://calai:calai_dev_password"
+            f"@127.0.0.1:5432/calai"
+        )
+    return configured
+
+
+_BASE_URL = _test_base_url()
+TEST_DATABASE_URL = _swap_database(_BASE_URL, TEST_DB_NAME)
+ADMIN_DSN = _asyncpg_dsn(_swap_database(_BASE_URL, "postgres"))
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -87,14 +121,19 @@ def _prepare_database() -> Iterator[None]:
     # be cleared because Settings is lru_cached and Alembic's env.py calls it.
     previous = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = TEST_DATABASE_URL
-    previous_mongo = os.environ.get("MONGODB_DB")
-    os.environ["MONGODB_DB"] = TEST_MONGO_DB
 
     # Rate limiting off by default. The auth tests make dozens of deliberate
     # failed logins, which would otherwise trip the limiter and fail assertions
     # about credentials with a 429 — a confusing failure in an unrelated test.
     # The tests that care switch it back on explicitly.
     os.environ["RATE_LIMIT_ENABLED"] = "false"
+
+    # And counting in memory, whatever the developer's .env says. With a real
+    # REDIS_URL the limiter would share one counter across the whole run — and
+    # `reset_all()` between tests only clears the in-process one, so budgets
+    # would leak from test to test and failures would depend on run order.
+    # `test_rate_limit_redis.py` talks to Redis deliberately, on its own keys.
+    os.environ["REDIS_URL"] = ""
     get_settings.cache_clear()
 
     config = Config(str(BACKEND_DIR / "alembic.ini"))
@@ -107,10 +146,6 @@ def _prepare_database() -> Iterator[None]:
         os.environ.pop("DATABASE_URL", None)
     else:
         os.environ["DATABASE_URL"] = previous
-    if previous_mongo is None:
-        os.environ.pop("MONGODB_DB", None)
-    else:
-        os.environ["MONGODB_DB"] = previous_mongo
     get_settings.cache_clear()
 
 
@@ -140,6 +175,12 @@ async def _clean_tables(engine) -> AsyncGenerator[None]:
     far faster, and it resets the tables without re-running migrations. Each test
     therefore starts from a known-empty database and cannot be affected by the
     order tests happen to run in.
+
+    Naming only the three user tables is enough because CASCADE follows the
+    foreign keys: `foods` (via `owner_id`), and from there `food_portions`,
+    `food_photos`, `meal_items`, `meals`, `diary_entries` and the recipe tables.
+    That reach is exactly what the relational schema buys — under the previous
+    split, the Mongo half needed its own separate cleanup fixture.
     """
     yield
     reset_all()
@@ -153,41 +194,7 @@ async def _clean_tables(engine) -> AsyncGenerator[None]:
 
 
 @pytest.fixture
-async def mongo() -> AsyncGenerator[AsyncIOMotorDatabase]:
-    """A Mongo handle for seeding and asserting, on *this test's* event loop.
-
-    Deliberately a separate client from the one the app uses, for a reason that
-    is easy to get wrong. A motor client binds to the event loop it was created
-    on, and `TestClient` runs the app in its own thread with its own loop — so a
-    test that seeded through the app's cached client and then awaited it directly
-    would be using one loop's client from another, which fails with an error that
-    looks like a database problem and is not.
-
-    Two clients against the same real database sidesteps it entirely: this one is
-    a test tool, the app's is the app's, and neither ever sees the other's loop.
-    Same shape as the `engine` fixture, and the same reason.
-    """
-    client = AsyncIOMotorClient(get_settings().mongodb_url, uuidRepresentation="standard")
-    yield client[TEST_MONGO_DB]
-    client.close()
-
-
-@pytest.fixture(autouse=True)
-async def _clean_mongo(mongo) -> AsyncGenerator[None]:
-    """Empty the Mongo collections between tests, and drop the app's client.
-
-    Closing the app's client is the Mongo equivalent of `NullPool`: it forces the
-    next test to build a fresh one on its own loop rather than inheriting a
-    client bound to a loop that has since closed.
-    """
-    yield
-    for name in (FOOD_ITEMS, MEALS, PHOTOS):
-        await mongo[name].delete_many({})
-    await close_client()
-
-
-@pytest.fixture
-async def catalogue(mongo) -> list[dict]:
+async def catalogue(session) -> list[CatalogueFood]:
     """Two seeded catalogue foods, covering both interesting unit kinds.
 
     Numbers are USDA's, recorded from a real response — an egg is 143 kcal per
@@ -195,8 +202,11 @@ async def catalogue(mongo) -> list[dict]:
     needs the network nor spends the shared USDA budget, and so a test that
     depends on an exact total cannot start failing because upstream revised a
     value.
+
+    Written through `_upsert_catalogue_food`, the same function the seeder uses,
+    so the fixture cannot drift from how rows are really created.
     """
-    docs = [
+    foods = [
         CatalogueFood(
             slug="egg",
             name_en="Egg",
@@ -249,9 +259,10 @@ async def catalogue(mongo) -> list[dict]:
             order=1,
         ),
     ]
-    payload = [doc.model_dump(mode="json") for doc in docs]
-    await mongo[FOOD_ITEMS].insert_many(payload)
-    return payload
+
+    for food in foods:
+        await _upsert_catalogue_food(session, None, food)
+    return foods
 
 
 @pytest.fixture

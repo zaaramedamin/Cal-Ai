@@ -8,10 +8,19 @@
 
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { type Meal, deleteMeal, listMeals, logMeal } from '@/api/catalogue';
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import { MEAL_SLOTS, type MealSlot } from '@/api/diary';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
@@ -20,6 +29,7 @@ import { EnterUp, PressableScale } from '@/components/motion';
 import { Screen } from '@/components/screen';
 import { draftActions } from '@/features/meals/draft-store';
 import { useT } from '@/i18n';
+import { photo } from '@/theme/imagery';
 import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -41,7 +51,7 @@ export default function MealsScreen() {
     } catch (caught) {
       setState({
         kind: 'error',
-        message: caught instanceof ApiError ? caught.userMessage : 'Could not load your meals.',
+        message: apiErrorMessage(t, caught, 'meals.loadFailed'),
       });
     }
   }, []);
@@ -71,10 +81,7 @@ export default function MealsScreen() {
       await logMeal(meal.id, slot);
       router.replace(HOME);
     } catch (caught) {
-      Alert.alert(
-        'Could not log that',
-        caught instanceof ApiError ? caught.userMessage : 'Please try again.',
-      );
+      Alert.alert(t('home.logFailed'), apiErrorMessage(t, caught, 'error.pleaseRetry'));
     } finally {
       setLogging(null);
     }
@@ -92,7 +99,7 @@ export default function MealsScreen() {
               await deleteMeal(meal.id);
               await load();
             } catch {
-              Alert.alert('Could not delete that meal.');
+              Alert.alert(t('meals.deleteFailed'));
             }
           })();
         },
@@ -126,7 +133,18 @@ export default function MealsScreen() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
           {state.meals.length === 0 ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyGlyph}>🍽</Text>
+              {/* The photograph replaces the glyph rather than joining it —
+                  showing both reads as a placeholder that never got finished.
+                  Until an image exists the emoji is the design, not a stand-in. */}
+              {photo('emptyMeals') ? (
+                <Image
+                  source={photo('emptyMeals')!}
+                  style={styles.emptyPhoto}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Text style={styles.emptyGlyph}>🍽</Text>
+              )}
               <Text style={text.title}>{t('meals.emptyTitle')}</Text>
               <Text style={[text.bodyMuted, styles.centeredBody]}>
 {t('meals.emptyBody')}
@@ -269,14 +287,15 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm },
   centeredBody: { textAlign: 'center', lineHeight: 21 },
   empty: { alignItems: 'center', gap: space.md, paddingVertical: space.xxxl },
+  emptyPhoto: { width: '100%', height: 180, borderRadius: radius.lg, marginBottom: space.md },
   emptyGlyph: { fontSize: 44 },
 
   scroll: { paddingBottom: space.xxl, gap: space.md },
-  card: { gap: space.md },
+  card: { gap: space.lg, paddingVertical: space.xl },
   cardHead: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md },
-  cardTitles: { flex: 1, gap: 2 },
+  cardTitles: { flex: 1, gap: space.xs },
   kcalBlock: { alignItems: 'flex-end' },
-  kcal: { ...text.numeric, fontSize: 24 },
+  kcal: { ...text.numeric, fontSize: 24, lineHeight: 30 },
   kcalUnit: { ...text.bodyMuted, fontSize: 11 },
 
   thumbs: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: space.sm },

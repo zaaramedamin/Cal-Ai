@@ -1,176 +1,193 @@
 /**
- * Authentication state for the whole app.
+ * Authentication state for the whole app, backed by Supabase.
  *
  * One provider owns the session, and every screen reads it through `useAuth()`.
  * The alternative — each screen loading tokens itself — means several components
  * independently deciding whether you are logged in, which is how you end up with
  * a login screen rendering behind a logged-in one.
+ *
+ * **What Supabase took over.** Storing tokens, refreshing them before they
+ * expire, rotating refresh tokens, and detecting a stolen one. All of that used
+ * to live here and in `api/client.ts`, and all of it is now `supabase.auth`. The
+ * job left is narrower and clearer: watch the session, expose it, and hand the
+ * current access token to the API client.
+ *
+ * The shape of `useAuth()` is unchanged on purpose, so screens that only sign in
+ * or out did not have to be rewritten to move providers.
  */
 
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import * as Linking from 'expo-linking';
+import {
+  type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
-import * as authApi from '@/api/auth';
 import { configureAuth } from '@/api/client';
-import { clearTokens, loadTokens, saveTokens } from '@/auth/storage';
+import { supabase } from '@/auth/supabase';
 
 /**
  * `loading` is a real state, not a detail.
  *
- * Reading SecureStore and verifying the token with the server takes a few
- * hundred milliseconds. Without a distinct loading state the app would default
- * to "logged out", flash the login screen, and then replace it — every single
- * launch, for users who are in fact signed in.
+ * Reading the keystore takes a few hundred milliseconds. Without a distinct
+ * loading state the app would default to "logged out", flash the login screen,
+ * and then replace it — every single launch, for users who are in fact signed in.
  */
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+/** What `signUp` produced, which is not always a session. */
+export type SignUpOutcome =
+  /** Signed in immediately — the project has email confirmation switched off. */
+  | { kind: 'signed-in' }
+  /**
+   * Supabase sent a confirmation email and the account is inert until it is
+   * clicked. The screen has to say so, or the user sits looking at a form that
+   * appeared to work and did nothing.
+   */
+  | { kind: 'confirm-email'; email: string };
+
 interface AuthContextValue {
   status: AuthStatus;
-  user: authApi.User | null;
+  user: AuthUser | null;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<SignUpOutcome>;
   signOut: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function toUser(session: Session | null): AuthUser | null {
+  if (!session?.user) return null;
+  return { id: session.user.id, email: session.user.email ?? '' };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
-  const [user, setUser] = useState<authApi.User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
 
   // A ref, not state, because the API client needs the token *synchronously*
   // while building a request. Reading it from state would hand out whatever
-  // value was captured at the last render, which after a refresh is the token we
-  // just replaced.
-  const tokens = useRef<{ access: string; refresh: string } | null>(null);
+  // value was captured at the last render, which after a refresh is the token
+  // that has just been replaced.
+  const accessToken = useRef<string | null>(null);
 
-  const applySession = useCallback(
-    async (result: authApi.AuthResult) => {
-      tokens.current = { access: result.access_token, refresh: result.refresh_token };
-      await saveTokens({ accessToken: result.access_token, refreshToken: result.refresh_token });
-      setUser(result.user);
-      setStatus('authenticated');
-    },
-    [],
-  );
-
-  const endSession = useCallback(async () => {
-    tokens.current = null;
-    await clearTokens();
-    setUser(null);
-    setStatus('unauthenticated');
+  const apply = useCallback((session: Session | null) => {
+    accessToken.current = session?.access_token ?? null;
+    setUser(toUser(session));
+    setStatus(session ? 'authenticated' : 'unauthenticated');
   }, []);
 
-  /* ---- wire the API client ------------------------------------------- */
-
-  useEffect(() => {
-    configureAuth({
-      getAccessToken: () => tokens.current?.access ?? null,
-
-      refreshSession: async () => {
-        const refreshToken = tokens.current?.refresh;
-        if (!refreshToken) return null;
-        try {
-          const pair = await authApi.refreshTokens(refreshToken);
-          tokens.current = { access: pair.access_token, refresh: pair.refresh_token };
-          await saveTokens({
-            accessToken: pair.access_token,
-            refreshToken: pair.refresh_token,
-          });
-          return pair.access_token;
-        } catch {
-          // The refresh token is spent, revoked, or the session was killed by
-          // theft detection. Either way there is nothing to recover.
-          return null;
-        }
-      },
-
-      onSessionExpired: () => {
-        void endSession();
-      },
-    });
-  }, [endSession]);
-
-  /* ---- restore a session on launch ------------------------------------ */
+  /* ---- watch the session ---------------------------------------------- */
 
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
-      const stored = await loadTokens();
-      if (!stored) {
-        if (!cancelled) setStatus('unauthenticated');
-        return;
-      }
+    // The session already on the device, if any. Supabase validates and
+    // refreshes it as part of this call, so a token that expired while the app
+    // was closed is renewed rather than rejected.
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled) apply(data.session);
+    });
 
-      tokens.current = { access: stored.accessToken, refresh: stored.refreshToken };
-
-      try {
-        // Verify with the server rather than trusting what is on disk. A stored
-        // token proves only that we were signed in *once* — it may have expired,
-        // been revoked by "sign out everywhere", or belong to a deleted account.
-        // This call also transparently refreshes via the client's 401 handling,
-        // so a user returning after a week is signed straight back in.
-        const me = await authApi.getCurrentUser();
-        if (cancelled) return;
-        setUser(me);
-        setStatus('authenticated');
-      } catch {
-        if (cancelled) return;
-        // Any failure ends the session, including a network error. That is a
-        // deliberate simplification: a network failure is not proof the session
-        // is invalid, but we cannot confirm it either, and a logged-in shell
-        // with no working API is worse than asking for a login.
-        //
-        // The cost is that opening the app with no signal logs you out. Phase 6
-        // handles offline properly, and this is one of the things it should
-        // revisit — by then there will be cached data worth staying logged in
-        // for.
-        await endSession();
-      }
-    })();
+    // Every subsequent change: sign-in, sign-out, token refresh, and the account
+    // being deleted server-side. Subscribing rather than polling is what keeps
+    // `accessToken.current` correct after a background refresh — the previous
+    // implementation had to notice a 401, refresh by hand, and retry.
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!cancelled) apply(session);
+    });
 
     return () => {
       cancelled = true;
+      subscription.subscription.unsubscribe();
     };
-  }, [endSession]);
+  }, [apply]);
+
+  /* ---- wire the API client -------------------------------------------- */
+
+  useEffect(() => {
+    configureAuth({
+      getAccessToken: () => accessToken.current,
+
+      refreshSession: async () => {
+        // Supabase refreshes on its own schedule, so reaching here means a
+        // request got a 401 with a token we believed was good — a session
+        // revoked server-side, or clock skew. Asking once is worth it; the
+        // listener above applies whatever comes back.
+        const { data, error } = await supabase.auth.refreshSession();
+        if (error || !data.session) return null;
+        return data.session.access_token;
+      },
+
+      onSessionExpired: () => {
+        void supabase.auth.signOut();
+      },
+    });
+  }, []);
 
   /* ---- actions --------------------------------------------------------- */
 
-  const signIn = useCallback(
-    async (email: string, password: string) => {
-      // Errors deliberately propagate to the calling screen, which is what shows
-      // the message. Swallowing them here would leave the form with no way to
-      // tell the user their password was wrong.
-      await applySession(await authApi.login(email.trim(), password));
-    },
-    [applySession],
-  );
+  // Errors deliberately propagate to the calling screen, which is what shows the
+  // message. Swallowing them here would leave the form with no way to tell the
+  // user their password was wrong.
 
-  const signUp = useCallback(
-    async (email: string, password: string) => {
-      await applySession(await authApi.register(email.trim(), password));
-    },
-    [applySession],
-  );
+  const signIn = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    if (error) throw error;
+  }, []);
+
+  const signUp = useCallback(async (email: string, password: string): Promise<SignUpOutcome> => {
+    const trimmed = email.trim();
+    const { data, error } = await supabase.auth.signUp({ email: trimmed, password });
+    if (error) throw error;
+
+    // No session means the project requires email confirmation. This is the case
+    // that silently does nothing if the screen ignores it: the call succeeded,
+    // the account exists, and the user still cannot sign in.
+    if (!data.session) return { kind: 'confirm-email', email: trimmed };
+    return { kind: 'signed-in' };
+  }, []);
 
   const signOut = useCallback(async () => {
-    const refreshToken = tokens.current?.refresh;
-    // Clear locally first, and never let a failed network call block it. If the
-    // server is unreachable, the user still expects the app to sign them out —
-    // the server-side token simply expires on its own schedule.
-    await endSession();
-    if (refreshToken) {
-      try {
-        await authApi.logout(refreshToken);
-      } catch {
-        // Already signed out locally; nothing useful to report.
-      }
-    }
-  }, [endSession]);
+    // The listener sets the state; nothing to do here but ask. A failure is
+    // ignored on purpose — the user expects to be signed out either way, and
+    // Supabase clears the local session even when the network call fails.
+    await supabase.auth.signOut();
+  }, []);
+
+  const requestPasswordReset = useCallback(async (email: string) => {
+    // `redirectTo` is what makes the emailed link come back into *this app*
+    // rather than opening a web page. It resolves to `calai://reset-password`
+    // in a build and to the Expo Go URL in development, so the same code works
+    // in both — hardcoding the scheme would break every development run.
+    //
+    // The URL must also be listed under Authentication -> URL Configuration in
+    // the Supabase dashboard; anything not on that allowlist is silently
+    // replaced with the site URL, and the link then opens a browser instead.
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: Linking.createURL('/reset-password'),
+    });
+    if (error) throw error;
+  }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, signIn, signUp, signOut }),
-    [status, user, signIn, signUp, signOut],
+    () => ({ status, user, signIn, signUp, signOut, requestPasswordReset }),
+    [status, user, signIn, signUp, signOut, requestPasswordReset],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

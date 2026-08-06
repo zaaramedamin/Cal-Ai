@@ -10,6 +10,8 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { addDays, localDateString } from '@/api/diary';
+import { useT } from '@/i18n';
+import { WEEKDAY_KEYS } from '@/i18n/strings';
 import { color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily } from '@/theme/typography';
 
@@ -19,9 +21,8 @@ interface WeekStripProps {
   onSelect: (day: string) => void;
 }
 
-const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
 export function WeekStrip({ selected, onSelect }: WeekStripProps) {
+  const t = useT();
   const today = localDateString();
   // The strip always ends at today: six days back through now. A calendar that
   // scrolls further back can come later; the strip covers the week that streaks
@@ -42,11 +43,11 @@ export function WeekStrip({ selected, onSelect }: WeekStripProps) {
             onPress={() => onSelect(day)}
             accessibilityRole="button"
             accessibilityState={{ selected: isSelected }}
-            accessibilityLabel={`Show ${day}`}
+            accessibilityLabel={t('week.showDay', { date: day })}
             style={styles.dayHit}
           >
             <Text style={[styles.letter, isSelected && styles.letterSelected]}>
-              {DAY_LETTERS[weekday]}
+              {t(WEEKDAY_KEYS[weekday])}
             </Text>
             <View
               style={[

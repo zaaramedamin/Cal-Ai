@@ -21,7 +21,7 @@ import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import {
   type ActivityLevel,
   type Goal,
@@ -35,7 +35,7 @@ import { RulerPicker } from '@/components/ruler-picker';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
 import { buildPaceOptions } from '@/features/onboarding/pace';
-import { useLanguage } from '@/i18n';
+import { type Translate, useLanguage } from '@/i18n';
 import {
   HEIGHT_RANGE,
   type HeightUnit,
@@ -50,41 +50,80 @@ import {
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
-const FOOTNOTE = 'Your measurements are stored only on your own account.';
+// Functions of `t` rather than module constants, for the reason spelled out on
+// `goalOptions` below: a constant would freeze whichever language happened to
+// be loaded when the module was first imported.
+function sexOptions(t: Translate): { value: Sex; label: string; description: string }[] {
+  return [
+    {
+      value: 'female',
+      label: t('onboarding.sexFemale'),
+      description: t('onboarding.sexFemaleBody'),
+    },
+    { value: 'male', label: t('onboarding.sexMale'), description: t('onboarding.sexMaleBody') },
+  ];
+}
 
-const SEX_OPTIONS: { value: Sex; label: string; description: string }[] = [
-  { value: 'female', label: 'Female', description: 'Uses the −161 constant' },
-  { value: 'male', label: 'Male', description: 'Uses the +5 constant' },
-];
+/** Labels are session counts — numerals, which need no translating. */
+function activityOptions(
+  t: Translate,
+): { value: ActivityLevel; label: string; description: string }[] {
+  return [
+    { value: 'sedentary', label: '0', description: t('onboarding.activitySedentary') },
+    { value: 'light', label: '1–2', description: t('onboarding.activityLight') },
+    { value: 'moderate', label: '3–5', description: t('onboarding.activityModerate') },
+    { value: 'active', label: '6–7', description: t('onboarding.activityActive') },
+    { value: 'very_active', label: '7+', description: t('onboarding.activityVeryActive') },
+  ];
+}
 
-const ACTIVITY_OPTIONS: {
-  value: ActivityLevel;
-  label: string;
-  description: string;
-}[] = [
-  { value: 'sedentary', label: '0', description: 'Desk job, little or no exercise' },
-  { value: 'light', label: '1–2', description: 'Workouts now and then' },
-  { value: 'moderate', label: '3–5', description: 'A few workouts per week' },
-  { value: 'active', label: '6–7', description: 'Hard exercise most days' },
-  { value: 'very_active', label: '7+', description: 'Physical job, or training twice a day' },
-];
-
-const GOAL_OPTIONS: {
+/**
+ * The four goals, as the user reads them.
+ *
+ * A function of `t` rather than a module constant, because the labels are
+ * translated and a constant would freeze whichever language was loaded first.
+ *
+ * **The descriptions deliberately contain no numbers.** They used to read "20%
+ * below maintenance", "10% above maintenance" and so on, which were the
+ * multipliers the app applied before the pace step existed. Once pace set the
+ * calorie target, those percentages described a calculation that no longer
+ * happened — the exact drift the derived-target design exists to prevent. The
+ * goal now states the intent and the pace step owns every figure, so there is
+ * only one place a number can be wrong.
+ */
+function goalOptions(t: Translate): {
   value: Goal;
   label: string;
   description: string;
   icon: 'trending-down' | 'remove' | 'trending-up' | 'barbell';
-}[] = [
-  { value: 'cut', label: 'Lose fat', description: '20% below maintenance', icon: 'trending-down' },
-  { value: 'maintain', label: 'Maintain', description: 'Eat at maintenance', icon: 'remove' },
-  {
-    value: 'lean_bulk',
-    label: 'Lean bulk',
-    description: '10% above maintenance',
-    icon: 'trending-up',
-  },
-  { value: 'bulk', label: 'Bulk', description: '15% above maintenance', icon: 'barbell' },
-];
+}[] {
+  return [
+    {
+      value: 'cut',
+      label: t('onboarding.goalCut'),
+      description: t('onboarding.goalCutBody'),
+      icon: 'trending-down',
+    },
+    {
+      value: 'maintain',
+      label: t('onboarding.goalMaintain'),
+      description: t('onboarding.goalMaintainBody'),
+      icon: 'remove',
+    },
+    {
+      value: 'lean_bulk',
+      label: t('onboarding.goalLeanBulk'),
+      description: t('onboarding.goalLeanBulkBody'),
+      icon: 'trending-up',
+    },
+    {
+      value: 'bulk',
+      label: t('onboarding.goalBulk'),
+      description: t('onboarding.goalBulkBody'),
+      icon: 'barbell',
+    },
+  ];
+}
 
 /** Steps in order. `target` and `pace` are skipped when the goal is maintenance. */
 const STEPS = ['sex', 'birth', 'body', 'activity', 'goal', 'target', 'pace', 'ready'] as const;
@@ -181,7 +220,7 @@ export default function OnboardingScreen() {
       router.replace('/plan');
     } catch (caught) {
       setError(
-        caught instanceof ApiError ? caught.userMessage : 'Something went wrong. Try again.',
+        apiErrorMessage(t, caught, 'onboarding.failed'),
       );
     } finally {
       setSubmitting(false);
@@ -199,11 +238,11 @@ export default function OnboardingScreen() {
       >
         {step === 'sex' && (
           <FunnelStep
-            title="Which equation should we use?"
-            subtitle="Mifflin-St Jeor uses a different constant for each. This is about body composition, not identity."
-            footnote={FOOTNOTE}
+            title={t('onboarding.sexTitle')}
+            subtitle={t('onboarding.sexSubtitle')}
+            footnote={t('onboarding.footnote')}
           >
-            {SEX_OPTIONS.map((option) => (
+            {sexOptions(t).map((option) => (
               <ChoiceCard
                 key={option.value}
                 label={option.label}
@@ -217,14 +256,14 @@ export default function OnboardingScreen() {
 
         {step === 'birth' && (
           <FunnelStep
-            title="When were you born?"
-            subtitle="Metabolic rate falls gradually with age, so the date matters more than you'd think."
-            footnote={FOOTNOTE}
+            title={t('onboarding.birthTitle')}
+            subtitle={t('onboarding.birthSubtitle')}
+            footnote={t('onboarding.footnote')}
           >
             <View style={styles.dateRow}>
               <View style={styles.dateSmall}>
                 <TextField
-                  label="Day"
+                  label={t('onboarding.day')}
                   value={birthDay}
                   onChangeText={setBirthDay}
                   keyboardType="number-pad"
@@ -234,7 +273,7 @@ export default function OnboardingScreen() {
               </View>
               <View style={styles.dateSmall}>
                 <TextField
-                  label="Month"
+                  label={t('onboarding.month')}
                   value={birthMonth}
                   onChangeText={setBirthMonth}
                   keyboardType="number-pad"
@@ -244,7 +283,7 @@ export default function OnboardingScreen() {
               </View>
               <View style={styles.dateLarge}>
                 <TextField
-                  label="Year"
+                  label={t('onboarding.year')}
                   value={birthYear}
                   onChangeText={setBirthYear}
                   keyboardType="number-pad"
@@ -257,10 +296,14 @@ export default function OnboardingScreen() {
         )}
 
         {step === 'body' && (
-          <FunnelStep title="Height & weight" subtitle="Both feed the calculation." footnote={FOOTNOTE}>
+          <FunnelStep
+            title={t('onboarding.bodyTitle')}
+            subtitle={t('onboarding.bodySubtitle')}
+            footnote={t('onboarding.footnote')}
+          >
             <View style={styles.measure}>
               <View style={styles.measureHead}>
-                <Text style={styles.measureLabel}>Height</Text>
+                <Text style={styles.measureLabel}>{t('body.height')}</Text>
                 <UnitToggle
                   options={[
                     { value: 'ftin', label: 'ft/in' },
@@ -289,7 +332,7 @@ export default function OnboardingScreen() {
 
             <View style={styles.measure}>
               <View style={styles.measureHead}>
-                <Text style={styles.measureLabel}>Weight</Text>
+                <Text style={styles.measureLabel}>{t('body.weight')}</Text>
                 <UnitToggle
                   options={[
                     { value: 'lbs', label: 'lbs' },
@@ -323,14 +366,15 @@ export default function OnboardingScreen() {
 
         {step === 'activity' && (
           <FunnelStep
-            title="How often do you train?"
-            subtitle="Be honest — overestimating here is the single most common reason a calorie target comes out too high."
-            footnote={FOOTNOTE}
+            title={t('onboarding.activityTitle')}
+            image="onboardingDone"
+            subtitle={t('onboarding.activitySubtitle')}
+            footnote={t('onboarding.footnote')}
           >
-            {ACTIVITY_OPTIONS.map((option) => (
+            {activityOptions(t).map((option) => (
               <ChoiceCard
                 key={option.value}
-                label={`${option.label} sessions a week`}
+                label={t('onboarding.sessionsPerWeek', { count: option.label })}
                 description={option.description}
                 selected={activity === option.value}
                 onPress={() => setActivity(option.value)}
@@ -341,11 +385,12 @@ export default function OnboardingScreen() {
 
         {step === 'goal' && (
           <FunnelStep
-            title="What are you aiming for?"
-            subtitle="This sets how far your target sits from maintenance."
-            footnote={FOOTNOTE}
+            title={t('onboarding.goalTitle')}
+            image="onboarding2"
+            subtitle={t('onboarding.goalSubtitle')}
+            footnote={t('onboarding.footnote')}
           >
-            {GOAL_OPTIONS.map((option) => (
+            {goalOptions(t).map((option) => (
               <ChoiceCard
                 key={option.value}
                 icon={option.icon}
@@ -373,9 +418,10 @@ export default function OnboardingScreen() {
 
         {step === 'target' && (
           <FunnelStep
-            title="What weight are you aiming for?"
-            subtitle="Used for the projection below. Your calorie target comes from your goal, not from this number."
-            footnote={FOOTNOTE}
+            title={t('onboarding.targetTitle')}
+            image="onboarding1"
+            subtitle={t('onboarding.targetSubtitle')}
+            footnote={t('onboarding.footnote')}
           >
             {weightUnit === 'kg' ? (
               <RulerPicker
@@ -383,7 +429,7 @@ export default function OnboardingScreen() {
                 value={Math.round(targetKg)}
                 onChange={setTargetKg}
                 unit="kg"
-                reference={{ value: weightKg, label: 'Now' }}
+                reference={{ value: weightKg, label: t('onboarding.rulerNow') }}
               />
             ) : (
               <RulerPicker
@@ -391,7 +437,7 @@ export default function OnboardingScreen() {
                 value={Math.round(kgToLbs(targetKg))}
                 onChange={(lbs) => setTargetKg(lbsToKg(lbs))}
                 unit="lbs"
-                reference={{ value: kgToLbs(weightKg), label: 'Now' }}
+                reference={{ value: kgToLbs(weightKg), label: t('onboarding.rulerNow') }}
               />
             )}
           </FunnelStep>
@@ -401,7 +447,8 @@ export default function OnboardingScreen() {
           <FunnelStep
             title={t('onboarding.paceTitle')}
             subtitle={t('onboarding.paceSubtitle')}
-            footnote={FOOTNOTE}
+            image="onboarding3"
+            footnote={t('onboarding.footnote')}
           >
             {buildPaceOptions(weightKg, goal === 'maintain' ? null : targetKg, language).map(
               (option) => (
@@ -439,18 +486,16 @@ export default function OnboardingScreen() {
 
         {step === 'ready' && (
           <FunnelStep
-            title={readyTitle(goal, weightKg, targetKg, weightUnit)}
-            subtitle="People who log consistently in the first week are far more likely to still be logging in the second. The first few days are the whole game."
+            title={readyTitle(t, goal, weightKg, targetKg, weightUnit)}
+            subtitle={t('onboarding.readySubtitle')}
           >
             <AchievementCurve />
             <View style={styles.curveAxis}>
-              <Text style={styles.curveAxisLabel}>Day 1</Text>
-              <Text style={styles.curveAxisLabel}>Day 7</Text>
-              <Text style={styles.curveAxisLabel}>Day 30</Text>
+              <Text style={styles.curveAxisLabel}>{t('onboarding.curveDay', { n: 1 })}</Text>
+              <Text style={styles.curveAxisLabel}>{t('onboarding.curveDay', { n: 7 })}</Text>
+              <Text style={styles.curveAxisLabel}>{t('onboarding.curveDay', { n: 30 })}</Text>
             </View>
-            <Text style={styles.illustrative}>
-              Illustrative — it shows the habit curve, not a prediction about you.
-            </Text>
+            <Text style={styles.illustrative}>{t('onboarding.curveCaveat')}</Text>
           </FunnelStep>
         )}
 
@@ -462,7 +507,7 @@ export default function OnboardingScreen() {
       </ScrollView>
 
       <Button
-        label={isLast ? 'Build my plan' : 'Next'}
+        label={isLast ? t('onboarding.finish') : t('onboarding.next')}
         disabled={!canAdvance[step]}
         loading={submitting}
         onPress={() => {
@@ -474,18 +519,27 @@ export default function OnboardingScreen() {
   );
 }
 
+/**
+ * The last step's heading, which changes with what was chosen.
+ *
+ * Four whole sentences rather than one with the verb swapped in. "drop" and
+ * "gain" are one word apart in English and a different construction in French,
+ * and a sentence assembled from a verb slot only ever reads correctly in the
+ * language it was assembled for.
+ */
 function readyTitle(
+  t: Translate,
   goal: Goal | null,
   weightKg: number,
   targetKg: number,
   unit: WeightUnit,
 ): string {
-  if (goal === 'maintain') return 'Ready to hold steady?';
+  if (goal === 'maintain') return t('onboarding.readyHold');
   const deltaKg = Math.abs(weightKg - targetKg);
   const shown = Math.round(unit === 'kg' ? deltaKg : kgToLbs(deltaKg));
-  if (shown === 0) return 'Ready to start?';
-  const verb = targetKg < weightKg ? 'drop' : 'gain';
-  return `Ready to ${verb} ${shown} ${unit}?`;
+  if (shown === 0) return t('onboarding.readyStart');
+  const key = targetKg < weightKg ? 'onboarding.readyLose' : 'onboarding.readyGain';
+  return t(key, { amount: shown, unit });
 }
 
 function UnitToggle<T extends string>({

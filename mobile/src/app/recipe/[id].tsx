@@ -3,13 +3,16 @@ import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { getRecipe } from '@/api/recipes';
+import { BackHeader } from '@/components/back-header';
 import { Screen } from '@/components/screen';
 import { draftActions } from '@/features/recipes/draft-store';
 import { RecipeBuilder } from '@/features/recipes/recipe-builder';
+import { useT } from '@/i18n';
 import { space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
 export default function EditRecipeScreen() {
+  const t = useT();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,20 +48,23 @@ export default function EditRecipeScreen() {
         });
         setReady(true);
       } catch {
-        if (!cancelled) setError('Could not load this recipe.');
+        if (!cancelled) setError(t('recipe.loadFailed'));
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, t]);
 
   if (error) {
     return (
       <Screen>
+        {/* A dead end without this: the builder's own Cancel never renders on
+            the error branch, so a recipe that failed to load trapped you. */}
+        <BackHeader />
         <View style={styles.centered}>
-          <Text style={text.title}>Couldn&apos;t load that recipe</Text>
+          <Text style={text.title}>{t('recipe.cantLoad')}</Text>
           <Text style={text.bodyMuted}>{error}</Text>
         </View>
       </Screen>
@@ -69,7 +75,7 @@ export default function EditRecipeScreen() {
     return (
       <Screen>
         <View style={styles.centered}>
-          <Text style={text.bodyMuted}>Loading…</Text>
+          <Text style={text.bodyMuted}>{t('common.loading')}</Text>
         </View>
       </Screen>
     );

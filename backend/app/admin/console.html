@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>CalAi — review</title>
+<style>
+  :root {
+    --ink: #14140f; --muted: #6b6b63; --faint: #9a9a90;
+    --paper: #f6f6f4; --surface: #ffffff; --hairline: #e6e6e0;
+    --accent: #1f7a4d; --danger: #b04a3a; --warn: #b8781f;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--paper); color: var(--ink);
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 24px; background: var(--ink); color: #fff;
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  header .spacer { flex: 1; }
+  header .who { font-size: 12px; color: rgba(255,255,255,.6); }
+  main { max-width: 860px; margin: 0 auto; padding: 24px; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+  .tabs button {
+    font: inherit; font-size: 14px; border: 0; cursor: pointer;
+    padding: 8px 14px; border-radius: 999px;
+    background: transparent; color: var(--muted);
+  }
+  .tabs button.on { background: var(--ink); color: #fff; }
+  .tabs .count {
+    display: inline-block; margin-left: 6px; padding: 0 6px;
+    border-radius: 999px; background: rgba(0,0,0,.12); font-size: 11px;
+  }
+  .tabs button.on .count { background: rgba(255,255,255,.22); }
+
+  .card {
+    background: var(--surface); border-radius: var(--radius);
+    padding: 18px; margin-bottom: 14px; border: 1px solid var(--hairline);
+  }
+  .card h2 { font-size: 16px; margin: 0 0 2px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .row { display: flex; align-items: flex-start; gap: 16px; }
+  .row .grow { flex: 1; min-width: 0; }
+
+  .pill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: .2px;
+  }
+  .pill.plausible { background: #e5f2ea; color: var(--accent); }
+  .pill.suspect   { background: #fdf0dc; color: var(--warn); }
+  .pill.not_food  { background: #f8e6e2; color: var(--danger); }
+  .pill.unscreened{ background: #eeeeea; color: var(--muted); }
+  .pill.source    { background: #eeeeea; color: var(--muted); }
+  .pill.check     { background: #fdf0dc; color: var(--warn); }
+
+  table.macros { border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  table.macros td { padding: 2px 14px 2px 0; }
+  table.macros td.n { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .mismatch { color: var(--danger); font-weight: 600; }
+  .agrees { color: var(--muted); }
+
+  .quote {
+    border-left: 3px solid var(--hairline); padding: 6px 0 6px 12px;
+    margin: 10px 0; color: var(--muted); font-size: 13px; white-space: pre-wrap;
+  }
+  .quote.model { border-left-color: var(--warn); }
+  .quote.system { border-left-color: var(--warn); background: #fffaf1; }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  input, select, textarea {
+    font: inherit; width: 100%; padding: 8px 10px;
+    border: 1px solid var(--hairline); border-radius: 8px; background: #fff;
+    color: var(--ink);
+  }
+  textarea { min-height: 60px; resize: vertical; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+  fieldset { border: 1px dashed var(--hairline); border-radius: 8px; padding: 12px; margin: 12px 0 0; }
+  legend { font-size: 12px; color: var(--muted); padding: 0 6px; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  button.act {
+    font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--hairline); background: #fff; color: var(--ink);
+    padding: 9px 16px; border-radius: 8px;
+  }
+  button.act.go { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.act.no { background: var(--danger); border-color: var(--danger); color: #fff; }
+  button.act:disabled { opacity: .45; cursor: default; }
+
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .error {
+    background: #f8e6e2; color: #7a2c20; padding: 10px 12px;
+    border-radius: 8px; font-size: 13px; margin: 10px 0;
+  }
+  .login { max-width: 340px; margin: 80px auto; }
+  .login .card > * + * { margin-top: 12px; }
+  .hide { display: none !important; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .stat { background: var(--surface); border: 1px solid var(--hairline);
+          border-radius: 10px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; letter-spacing: -.4px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .stat.warn b { color: var(--warn); }
+
+  #foodSearch { margin: 14px 0 8px; }
+  table.foods { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.foods th { text-align: left; font-size: 11px; text-transform: uppercase;
+                   letter-spacing: .4px; color: var(--faint); padding: 6px 8px;
+                   border-bottom: 1px solid var(--hairline); position: sticky; top: 52px;
+                   background: var(--paper); }
+  table.foods td { padding: 6px 8px; border-bottom: 1px solid var(--hairline);
+                   vertical-align: top; }
+  table.foods td.n { font-variant-numeric: tabular-nums; text-align: right; color: var(--muted); }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #eeeeea;
+         color: var(--muted); }
+  .tag.no { background: #f8e6e2; color: var(--danger); }
+  .tag.yes { background: #e5f2ea; color: var(--accent); }
+  .scroller { max-height: 60vh; overflow: auto; border: 1px solid var(--hairline);
+              border-radius: 10px; background: var(--surface); padding: 0 10px; }
+</style>
+</head>
+<body>
+
+<header class="hide" id="bar">
+  <h1>CalAi review</h1>
+  <div class="spacer"></div>
+  <span class="who" id="who"></span>
+  <button class="act" id="signout" style="padding:5px 12px;font-size:13px">Sign out</button>
+</header>
+
+<main>
+  <!-- Sign in -->
+  <div class="login" id="login">
+    <div class="card">
+      <h2>Sign in</h2>
+      <p class="sub">The same account you use in the app, with admin rights. This
+        page has no access of its own — it signs in exactly as the phone does and
+        calls the same API.</p>
+      <div><label for="email">Email</label><input id="email" type="email" autocomplete="username"></div>
+      <div><label for="password">Password</label><input id="password" type="password" autocomplete="current-password"></div>
+      <div id="loginError"></div>
+      <button class="act go" id="signin" style="width:100%">Sign in</button>
+    </div>
+  </div>
+
+  <!-- Queues -->
+  <div id="app" class="hide">
+    <div class="tabs">
+      <button data-tab="submissions" class="on">Submissions <span class="count" id="nSubs">0</span></button>
+      <button data-tab="reports">Reports <span class="count" id="nReports">0</span></button>
+      <button data-tab="notes">Notes</button>
+    </div>
+    <div id="error"></div>
+    <div id="list"></div>
+  </div>
+</main>
+
+<script>
+/*
+ * The whole console. No framework, no build step, no dependencies.
+ *
+ * The token lives in a module-scope variable and nowhere else — not
+ * localStorage, not a cookie. Closing the tab ends the session, which is the
+ * right default for a page that can approve a food into everybody's search.
+ * The cost is signing in again after a refresh, which is cheap at this volume.
+ */
+
+let token = null;
+let tab = 'submissions';
+let rows = [];
+let notes = null;
+let config = null;
+
+const $ = (id) => document.getElementById(id);
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    // FastAPI's `detail` is the actionable part — the 422 explaining that a
+    // USDA row cannot be corrected is written for exactly this moment.
+    throw new Error(body?.detail || `${response.status} ${response.statusText}`);
+  }
+  return body;
+}
+
+/* ---- sign in ---------------------------------------------------------- */
+
+/*
+ * Two sign-in paths, because the project has two auth systems that coexist.
+ *
+ * When SUPABASE_URL is set — which it is in every real deployment — accounts
+ * live in Supabase and `users.password_hash` is null, so the hand-built
+ * `/api/v1/auth/login` cannot authenticate anybody. The token has to come from
+ * Supabase, exactly as the mobile app gets it, and the backend then verifies it
+ * against the project's published signing keys.
+ *
+ * The legacy path is kept for a deployment with no Supabase project, where it
+ * is the only thing that works.
+ */
+
+async function fetchToken(email, password) {
+  if (config.supabase_url) {
+    const response = await fetch(
+      `${config.supabase_url.replace(/\/$/, '')}/auth/v1/token?grant_type=password`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: config.supabase_anon_key },
+        body: JSON.stringify({ email, password }),
+      },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      // Supabase spells the message differently depending on the failure, and
+      // the one that matters most — "Email not confirmed" — only appears in
+      // `msg`. Falling back to a generic string would hide it.
+      throw new Error(
+        body.error_description || body.msg || body.error || `Sign-in failed (${response.status})`,
+      );
+    }
+    return body.access_token;
+  }
+
+  const auth = await api('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+  return auth.access_token;
+}
+
+async function signIn() {
+  $('loginError').innerHTML = '';
+  $('signin').disabled = true;
+  try {
+    if (config === null) config = await api('/admin/config');
+    token = await fetchToken($('email').value.trim(), $('password').value);
+
+    // Prove the account is actually an admin *before* showing the console.
+    // The queue answers 404 to everyone else, so this doubles as the check —
+    // and failing here is far clearer than an empty screen would be.
+    await api('/api/v1/review/queue?limit=1');
+
+    $('who').textContent = $('email').value.trim();
+    $('login').classList.add('hide');
+    $('app').classList.remove('hide');
+    $('bar').classList.remove('hide');
+    $('password').value = '';
+    await refresh();
+  } catch (err) {
+    token = null;
+    $('loginError').innerHTML = `<div class="error">${
+      err.message === 'Not found.'
+        ? 'That account is not an admin.'
+        : escapeHtml(err.message)
+    }</div>`;
+  } finally {
+    $('signin').disabled = false;
+  }
+}
+
+function signOut() {
+  token = null;
+  rows = [];
+  $('app').classList.add('hide');
+  $('bar').classList.add('hide');
+  $('login').classList.remove('hide');
+}
+
+/* ---- loading ----------------------------------------------------------- */
+
+async function refresh() {
+  $('error').innerHTML = '';
+  try {
+    if (tab === 'notes') {
+      notes = await api('/api/v1/review/inventory');
+      renderNotes();
+      return;
+    }
+    const [subs, reports] = await Promise.all([
+      api('/api/v1/review/queue'),
+      api('/api/v1/review/reports'),
+    ]);
+    $('nSubs').textContent = subs.length;
+    // Reports come one row per person; the queue is per *food*, because one
+    // decision closes every open report on it.
+    $('nReports').textContent = groupReports(reports).length;
+    rows = tab === 'submissions' ? subs : groupReports(reports);
+    render();
+  } catch (err) {
+    $('error').innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+/** One card per food, carrying every report filed against it. */
+function groupReports(reports) {
+  const byFood = new Map();
+  for (const report of reports) {
+    const existing = byFood.get(report.food_id);
+    if (existing) existing.reports.push(report);
+    else byFood.set(report.food_id, { food: report.food, reports: [report] });
+  }
+  // Most-disputed first, matching the order the API already returns.
+  return [...byFood.values()];
+}
+
+/* ---- rendering ---------------------------------------------------------- */
+
+function render() {
+  if (tab === 'notes') return renderNotes();
+  if (rows.length === 0) {
+    $('list').innerHTML = `<p class="empty">Nothing waiting. </p>`;
+    return;
+  }
+  $('list').innerHTML = rows
+    .map((row, i) => (tab === 'submissions' ? submissionCard(row, i) : reportCard(row, i)))
+    .join('');
+}
+
+/**
+ * The macro cross-check, on every card.
+ *
+ * 4/4/9 against the declared calories is the single most useful thing to know
+ * about a food somebody says is wrong, and it is the arithmetic a reviewer
+ * would otherwise do by hand and get wrong. Flagged red past 10%, which is
+ * wider than rounding and narrower than a typo.
+ */
+function macroTable(food) {
+  const implied = 4 * food.protein_g + 4 * food.carbs_g + 9 * food.fat_g;
+  const off = food.kcal > 0 ? Math.abs(implied - food.kcal) / food.kcal : 0;
+  return `
+    <table class="macros">
+      <tr>
+        <td>Declared</td><td class="n">${round(food.kcal)} kcal</td>
+        <td>Protein</td><td class="n">${round(food.protein_g)} g</td>
+        <td>Carbs</td><td class="n">${round(food.carbs_g)} g</td>
+        <td>Fat</td><td class="n">${round(food.fat_g)} g</td>
+      </tr>
+      <tr>
+        <td>Macros imply</td>
+        <td class="n ${off > 0.1 ? 'mismatch' : 'agrees'}">${round(implied)} kcal</td>
+        <td colspan="6" class="${off > 0.1 ? 'mismatch' : 'agrees'}">
+          ${off > 0.1 ? `${Math.round(off * 100)}% apart — worth checking` : 'agrees'}
+        </td>
+      </tr>
+    </table>`;
+}
+
+function correctionFields(i, food) {
+  return `
+    <fieldset>
+      <legend>Corrections — leave blank to keep as submitted</legend>
+      <div class="fields">
+        <div><label>Name</label><input id="name${i}" placeholder="${escapeAttr(food.name)}"></div>
+        <div><label>Brand</label><input id="brand${i}" placeholder="${escapeAttr(food.brand || '—')}"></div>
+        <div><label>kcal</label><input id="kcal${i}" type="number" step="0.1" placeholder="${round(food.kcal)}"></div>
+        <div><label>Protein g</label><input id="protein_g${i}" type="number" step="0.1" placeholder="${round(food.protein_g)}"></div>
+        <div><label>Carbs g</label><input id="carbs_g${i}" type="number" step="0.1" placeholder="${round(food.carbs_g)}"></div>
+        <div><label>Fat g</label><input id="fat_g${i}" type="number" step="0.1" placeholder="${round(food.fat_g)}"></div>
+      </div>
+    </fieldset>`;
+}
+
+function submissionCard(item, i) {
+  const food = item.food;
+  const verdict = item.llm_verdict || 'unscreened';
+  return `
+    <div class="card" id="card${i}">
+      <div class="row">
+        <div class="grow">
+          <h2>${escapeHtml(food.name)}</h2>
+          <div class="sub">${escapeHtml(food.brand || 'No brand')} ·
+            submitted ${when(item.submitted_at)}</div>
+        </div>
+        <span class="pill ${verdict}">${verdict.replace('_', ' ')}</span>
+      </div>
+
+      ${macroTable(food)}
+
+      ${item.llm_reason
+        ? `<div class="quote model"><strong>Screening:</strong> ${escapeHtml(item.llm_reason)}
+             <div class="note">Advice, not a decision. You are the decision.</div></div>`
+        : `<div class="note">Not screened — the model could not be reached when this arrived.</div>`}
+
+      ${correctionFields(i, food)}
+
+      <div style="margin-top:12px">
+        <label for="note${i}">Note to the author — required to reject</label>
+        <textarea id="note${i}" placeholder="Why, in words they can act on."></textarea>
+      </div>
+
+      <div id="err${i}"></div>
+      <div class="actions">
+        <button class="act go" onclick="decide(${i}, true)">Approve</button>
+        <button class="act no" onclick="decide(${i}, false)">Reject</button>
+      </div>
+    </div>`;
+}
+
+function reportCard(group, i) {
+  const food = group.food;
+  const filed = group.reports.length;
+  // A card is a verification job rather than a complaint when the only thing
+  // objecting is the importer's arithmetic.
+  const systemOnly = group.reports.every((r) => r.system);
+  return `
+    <div class="card" id="card${i}">
+      <div class="row">
+        <div class="grow">
+          <h2>${escapeHtml(food.name)}</h2>
+          <div class="sub">${escapeHtml(food.brand || 'No brand')} ·
+            ${systemOnly
+              ? 'flagged at import'
+              : `${filed} report${filed === 1 ? '' : 's'}`}</div>
+        </div>
+        <span class="pill ${systemOnly ? 'check' : 'source'}">${
+          systemOnly ? 'verify' : escapeHtml(food.source)
+        }</span>
+      </div>
+
+      ${macroTable(food)}
+
+      ${group.reports
+        .map(
+          (r) => `<div class="quote${r.system ? ' system' : ''}"><strong>${
+            r.system ? 'Flagged at import' : r.reason.replace(/_/g, ' ')
+          }</strong>${r.note ? ` — ${escapeHtml(r.note)}` : ''}<div class="note">${
+            r.system
+              ? 'Nobody complained — the arithmetic did. It says one of these numbers is wrong, not which.'
+              : when(r.created_at)
+          }</div></div>`,
+        )
+        .join('')}
+
+      <div>
+        <label for="res${i}">What to do</label>
+        <select id="res${i}" onchange="onResolution(${i}, ${food.correctable})">
+          <option value="dismiss">Dismiss — checked, the food is fine</option>
+          <option value="withdrawn">Withdraw — pull it from search</option>
+          <option value="corrected"${food.correctable ? '' : ' disabled'}>
+            Correct the numbers${food.correctable ? '' : ' — not for ' + escapeAttr(food.source)}
+          </option>
+        </select>
+      </div>
+
+      ${food.correctable
+        ? `<div id="fix${i}" class="hide">${correctionFields(i, food)}</div>`
+        : `<div class="note">These numbers came from ${escapeHtml(food.source)} and are not ours
+             to edit — the row would then claim a source its figures no longer have.
+             Withdraw it and report the error upstream.</div>`}
+
+      <div style="margin-top:12px">
+        <label for="note${i}">Note to everyone who reported it</label>
+        <textarea id="note${i}" placeholder="What you found. They see this."></textarea>
+      </div>
+
+      <div id="err${i}"></div>
+      <div class="actions">
+        <button class="act go" onclick="resolve(${i})">Apply</button>
+      </div>
+    </div>`;
+}
+
+function onResolution(i, correctable) {
+  if (!correctable) return;
+  $(`fix${i}`).classList.toggle('hide', $(`res${i}`).value !== 'corrected');
+}
+
+/* ---- notes -------------------------------------------------------------- */
+
+/**
+ * What is in the database and what it is still missing.
+ *
+ * Built because the questions it answers were previously only answerable by
+ * writing SQL — how many foods are there, which ones have no photograph, which
+ * ones nobody can log in sensible units. Those are the questions that decide
+ * what to work on next, and they should not need a database client.
+ *
+ * The whole food list is fetched once and filtered in the browser. A few
+ * thousand compact rows is less than one screen of the app's photographs, and
+ * having it all client-side makes searching instant — which is what matters
+ * when the job is "find the foods still needing a photo".
+ */
+function renderNotes() {
+  if (!notes) return;
+  const n = notes;
+
+  const stat = (value, label, warn) =>
+    `<div class="stat${warn ? ' warn' : ''}"><b>${value}</b><span>${label}</span></div>`;
+
+  const sources = Object.entries(n.by_source)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => `${escapeHtml(name)} ${count}`)
+    .join(' · ');
+
+  $('list').innerHTML = `
+    <div class="card">
+      <h2>Where the food database stands</h2>
+      <div class="sub" style="margin-bottom:14px">${sources}</div>
+      <div class="stats">
+        ${stat(n.foods_total, 'foods')}
+        ${stat(n.with_photo, 'have a photo')}
+        ${stat(n.missing_photo, 'need a photo', n.missing_photo > 0)}
+        ${stat(n.with_portions, 'have portions')}
+        ${stat(n.missing_portions, 'log in grams only', n.missing_portions > 0)}
+      </div>
+      <div class="stats" style="margin-top:10px">
+        ${stat(n.pending_submissions, 'submissions waiting', n.pending_submissions > 0)}
+        ${stat(n.import_flags, 'flagged at import', n.import_flags > 0)}
+        ${stat(n.open_reports, 'open reports', n.open_reports > 0)}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Serving sizes still needed</h2>
+      <p class="sub">Deliberately blank. Every one varies by bakery, region or
+        household and there is no source for a weight — a plausible guess here
+        would silently scale every nutrient on the row. A kitchen scale settles
+        each of them.</p>
+      <ul class="note" style="margin:10px 0 0; padding-left:18px; line-height:1.9">
+        ${n.portions_wanted.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Every food, by name</h2>
+      <p class="sub">${n.foods.length} rows. Search filters as you type; the
+        photo column is the working list for the next shoot.</p>
+      <input id="foodSearch" placeholder="Filter by name, or type: no-photo" oninput="filterFoods()">
+      <div class="scroller">
+        <table class="foods">
+          <thead><tr>
+            <th>Name</th><th>French</th><th>Source</th>
+            <th style="text-align:right">kcal</th><th>Photo</th><th>Portions</th>
+          </tr></thead>
+          <tbody id="foodRows"></tbody>
+        </table>
+      </div>
+    </div>`;
+
+  filterFoods();
+}
+
+function filterFoods() {
+  const box = $('foodSearch');
+  const term = (box ? box.value : '').trim().toLowerCase();
+  const onlyMissingPhoto = term === 'no-photo';
+  const text = onlyMissingPhoto ? '' : term;
+
+  const shown = notes.foods.filter((f) => {
+    if (onlyMissingPhoto && f.has_photo) return false;
+    if (!text) return true;
+    return `${f.name} ${f.name_fr || ''}`.toLowerCase().includes(text);
+  });
+
+  $('foodRows').innerHTML = shown
+    .map(
+      (f) => `<tr>
+        <td>${escapeHtml(f.name)}${f.withdrawn ? ' <span class="tag no">withdrawn</span>' : ''}</td>
+        <td class="sub">${escapeHtml(f.name_fr || '')}</td>
+        <td><span class="tag">${escapeHtml(f.source)}</span></td>
+        <td class="n">${round(f.kcal)}</td>
+        <td><span class="tag ${f.has_photo ? 'yes' : 'no'}">${f.has_photo ? 'yes' : 'none'}</span></td>
+        <td class="n">${f.portions || '—'}</td>
+      </tr>`,
+    )
+    .join('') || '<tr><td colspan="6" class="empty">Nothing matches.</td></tr>';
+}
+
+/* ---- deciding ----------------------------------------------------------- */
+
+/** Only fields the reviewer actually typed. Blank means "leave as submitted". */
+function corrections(i) {
+  const out = {};
+  for (const field of ['name', 'brand']) {
+    const value = $(`${field}${i}`)?.value.trim();
+    if (value) out[field] = value;
+  }
+  for (const field of ['kcal', 'protein_g', 'carbs_g', 'fat_g']) {
+    const value = $(`${field}${i}`)?.value.trim();
+    if (value !== '' && value !== undefined && !Number.isNaN(Number(value))) {
+      out[field] = Number(value);
+    }
+  }
+  return out;
+}
+
+function busy(i, on) {
+  document.querySelectorAll(`#card${i} button`).forEach((b) => (b.disabled = on));
+}
+
+async function decide(i, approve) {
+  const item = rows[i];
+  const note = $(`note${i}`).value.trim();
+  busy(i, true);
+  $(`err${i}`).innerHTML = '';
+  try {
+    await api(`/api/v1/review/foods/${item.food.id}/decide`, {
+      method: 'POST',
+      body: JSON.stringify({ approve, note: note || null, ...corrections(i) }),
+    });
+    await refresh();
+  } catch (err) {
+    $(`err${i}`).innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+    busy(i, false);
+  }
+}
+
+async function resolve(i) {
+  const group = rows[i];
+  const choice = $(`res${i}`).value;
+  const note = $(`note${i}`).value.trim();
+  busy(i, true);
+  $(`err${i}`).innerHTML = '';
+  try {
+    // Any one report id will do: the endpoint closes every open report on that
+    // food, because the decision is about the food and not about who said so.
+    await api(`/api/v1/review/reports/${group.reports[0].id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({
+        accept: choice !== 'dismiss',
+        resolution: choice === 'dismiss' ? null : choice,
+        note: note || null,
+        ...(choice === 'corrected' ? corrections(i) : {}),
+      }),
+    });
+    await refresh();
+  } catch (err) {
+    $(`err${i}`).innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+    busy(i, false);
+  }
+}
+
+/* ---- odds and ends ------------------------------------------------------ */
+
+const round = (n) => (Math.round(n * 10) / 10).toLocaleString();
+
+function when(iso) {
+  if (!iso) return 'unknown';
+  const days = Math.floor((Date.now() - new Date(iso)) / 86400000);
+  if (days === 0) return 'today';
+  if (days === 1) return 'yesterday';
+  return `${days} days ago`;
+}
+
+/*
+ * Food names and notes are user-typed and go into innerHTML, so both escape
+ * routes have to be closed. A submission called `<img onerror=...>` would
+ * otherwise run script in the one session that can approve foods into
+ * everybody's search — the highest-value session in the system.
+ */
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+  );
+}
+const escapeAttr = escapeHtml;
+
+document.querySelectorAll('.tabs button').forEach((button) => {
+  button.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach((b) => b.classList.remove('on'));
+    button.classList.add('on');
+    tab = button.dataset.tab;
+    refresh();
+  };
+});
+
+$('signin').onclick = signIn;
+$('signout').onclick = signOut;
+$('password').addEventListener('keydown', (e) => e.key === 'Enter' && signIn());
+</script>
+</body>
+</html>

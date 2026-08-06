@@ -108,3 +108,22 @@ export function deviceTimezone(): string {
     return 'UTC';
   }
 }
+
+/**
+ * Delete the account and everything personal in it.
+ *
+ * Takes the email as confirmation, which the server checks against the signed-in
+ * account. There is no undo and no export, so the confirmation is something you
+ * cannot do by accident on a small screen.
+ *
+ * Foods you contributed *and had approved* stay in the shared database with your
+ * name detached — they are in other people's diaries, and removing them would
+ * silently rewrite what those people ate.
+ */
+export function deleteAccount(email: string): Promise<void> {
+  return apiRequest<void>('/api/v1/users/me', {
+    method: 'DELETE',
+    authenticated: true,
+    body: { email },
+  });
+}

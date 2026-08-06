@@ -31,7 +31,7 @@ prices, the user decides.
 |---|---|
 | Mobile | Expo SDK 54 (React Native 0.81, React 19.1), TypeScript strict, expo-router |
 | Backend | FastAPI, Python 3.13, SQLAlchemy 2.0 async, Pydantic v2 |
-| Database | PostgreSQL 16 via Docker Compose |
+| Database | PostgreSQL 16 via Docker Compose — one database, everything in it |
 | Migrations | Alembic, from the very first table |
 
 ---
@@ -85,16 +85,30 @@ paste it in:
 GEMINI_API_KEY=AIza...
 ```
 
-### 3. Databases
+### 3. Database
 
 ```powershell
 docker compose up -d
 docker compose ps          # wait for both to read "healthy"
 ```
 
-Two containers: **Postgres** for users, the diary, recipes and weights, and
-**MongoDB** for the curated food catalogue and its photos. Both are bound to
-127.0.0.1 — the phone talks to FastAPI, never to a database.
+Two containers, and only the first is required.
+
+**Postgres** holds everything — accounts, the diary, weights, recipes, the
+curated food catalogue, saved meals and the catalogue photos. It is bound to
+127.0.0.1, because the phone talks to FastAPI and never to a database.
+
+**Redis** holds rate-limit counters, and nothing else. Optional: leave
+`REDIS_URL` unset and the limiter counts in the memory of one process instead,
+which is correct for one worker and wrong for any deployment running more than
+one. It has no volume on purpose — everything in it is a window measured in
+minutes, so losing it on a restart costs nothing.
+
+The catalogue and meals lived in a second MongoDB container until July 2026. They
+are ordinary tables now, which is worth a sentence because it removed a whole
+class of problem: a diary entry can hold a real foreign key to the food it
+records, so `ON DELETE RESTRICT` stops a saved meal ever losing an ingredient and
+quietly under-reporting its calories.
 
 ### 3b. Seed the food catalogue
 
@@ -336,13 +350,59 @@ If step 2 and 3 look identical, the error handling is not actually doing its job
 - **A completed password reset revokes every session.** People reset because they forgot — or
   because they think they were compromised. An attacker holds a refresh token, not the password,
   so changing the password alone would not touch them.
+- **Rate limit counters are shared, when `REDIS_URL` is set.** Without it they live in the memory
+  of one Python process, so two uvicorn workers keep separate tallies and a limit of ten becomes
+  ten *per worker* — fine on a laptop, wrong for any real deployment. `docker compose up -d`
+  starts one locally. If Redis then goes away at runtime the limiter falls back to per-process
+  counting and says so in the log, rather than either locking every user out or switching the
+  limits off entirely.
 
-### Known limitation: rate limit counters are per-process
+### Two pipelines, and a person at the end of both
 
-They live in the memory of one Python process. Two uvicorn workers keep separate tallies, so the
-effective limit doubles, and a restart resets them. That is acceptable for a single-process
-deployment and is genuinely weak at scale — the fix is Redis, and it is deliberately isolated to
-`backend/app/core/rate_limit.py` so the swap touches one file.
+Nothing becomes public, and nothing already public changes, without an admin deciding.
+
+    author  submits  ->  model screens  ->  admin decides  ->  everybody sees it
+    anyone  reports  ->  admin checks   ->  corrected, withdrawn, or dismissed
+
+- **Approval is the only route by which one user's typing reaches another's search.** The model's
+  screening verdict is recorded beside the decision and never makes it. A food is usable by its
+  author from the moment it is created — waiting for approval to log your own lunch would be absurd.
+- **Reporting is how a number already in the database gets challenged.** Open Food Facts is
+  volunteer-entered from labels, USDA rows can be decades old, and an approved submission was read
+  by one person once. Without a way to dispute those, "every number traceable to its source" is a
+  claim with no recourse behind it.
+- **A report never changes a food by itself.** If it could, anybody would hold a button that edits
+  a nutrition value or deletes a competitor's product.
+- **An upheld report against a USDA or Open Food Facts row cannot be "corrected".** The numbers are
+  that source's and `source`/`source_id` say so — editing them in place would leave a row claiming
+  a provenance its figures no longer have. The answer is withdrawal, and the fix belongs upstream.
+- **Withdrawal is not deletion.** A wrong food is usually already in somebody's diary. It leaves
+  search and the catalogue and stays readable, because a past entry is a record of what was logged,
+  not a number the app is still standing behind.
+
+### Actioning the queues: `/admin`
+
+The backend serves a one-file admin console at **`/admin`**. Sign in with an account that has
+`is_admin`, and both queues are there with an Approve/Reject and a Correct/Withdraw/Dismiss on
+each card.
+
+**It has no privileged access of its own.** It signs in with an ordinary admin account and calls
+exactly the endpoints the phone calls, which is the whole reason it exists rather than a page
+wired to Postgres: every rule that makes a decision safe — a rejection needs a reason, one
+decision closes every open report on a food, a USDA row cannot be corrected in place — lives in
+`api/v1/review.py` and in nothing else. A hand-written `UPDATE` in Supabase Studio walks past all
+of them, and so would any admin tool talking to the database directly.
+
+Every card shows the macro cross-check (4/4/9 against the declared calories, flagged past 10%),
+because that is the arithmetic a reviewer would otherwise do by hand and get wrong.
+
+Not in the mobile app, deliberately: admin tooling does not belong in a binary every user
+installs, and a client that cannot call the decision endpoints cannot be tricked into calling
+them. Set `ADMIN_UI_ENABLED=false` to remove the page; the API is unaffected.
+
+Both queues are also readable as SQL views — `review_queue` and `reported_foods` — which is the
+better tool for *looking* at a lot of them at once. Reading is a view; deciding goes through the
+API.
 
 ### Known limitation: no email provider
 

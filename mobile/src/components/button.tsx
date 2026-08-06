@@ -16,7 +16,7 @@ import { PressableScale } from '@/components/motion';
 import { HIT_SLOP_MIN, color, elevation, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
-type Variant = 'primary' | 'secondary' | 'ghost';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 interface ButtonProps {
   label: string;
@@ -40,7 +40,8 @@ export function Button({
   // Blocking presses while loading is what prevents a double-tap creating two
   // accounts, or firing two logins that each mint a session.
   const inert = disabled || loading;
-  const onAccent = variant === 'primary';
+  // Both filled variants carry white text.
+  const onAccent = variant === 'primary' || variant === 'danger';
 
   return (
     <PressableScale
@@ -82,6 +83,10 @@ const styles = StyleSheet.create({
   // Same shape, no weight, accent-tinted. Reads as available but secondary.
   secondary: { backgroundColor: color.accentTint },
   ghost: { backgroundColor: 'transparent', minHeight: HIT_SLOP_MIN },
+  // Red and filled, for an action with no undo. Deliberately the same shape and
+  // weight as `primary`: a destructive button should be as easy to read as any
+  // other, and only its colour should argue against pressing it.
+  danger: { backgroundColor: color.danger, ...elevation.mid },
 
   disabled: { opacity: 0.4 },
 

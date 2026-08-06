@@ -8,9 +8,10 @@
  */
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   FlatList,
   Pressable,
   ScrollView,
@@ -19,7 +20,7 @@ import {
   View,
 } from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import {
   type FoodSearchResult,
   type MealSlot,
@@ -96,6 +97,38 @@ export default function SearchScreen() {
   // a search box show results for something you already stopped typing.
   const latestQuery = useRef('');
 
+  /**
+   * One search, shared by the debounce and by the keyboard's Search key.
+   *
+   * Pulled out of the effect because the Search key had nothing to call: the
+   * field declared `returnKeyType="search"` and no `onSubmitEditing`, so
+   * pressing it did nothing whatsoever — not even dismiss the keyboard. It
+   * looked broken because it was.
+   */
+  const runSearch = useCallback(
+    async (term: string) => {
+      latestQuery.current = term;
+      if (term.length < MIN_QUERY_LENGTH) {
+        setState({ kind: 'idle' });
+        return;
+      }
+      setState({ kind: 'searching' });
+      try {
+        const response = await searchFoods(term);
+        if (latestQuery.current !== term) return;
+        setState({
+          kind: 'results',
+          results: response.results,
+          cachedOnly: response.upstream_unavailable,
+        });
+      } catch (caught) {
+        if (latestQuery.current !== term) return;
+        setState({ kind: 'error', message: apiErrorMessage(t, caught, 'search.failed') });
+      }
+    },
+    [t],
+  );
+
   useEffect(() => {
     const trimmed = (searchOverride ?? query).trim();
     latestQuery.current = trimmed;
@@ -106,28 +139,9 @@ export default function SearchScreen() {
     }
 
     setState({ kind: 'searching' });
-    const timer = setTimeout(() => {
-      void (async () => {
-        try {
-          const response = await searchFoods(trimmed);
-          if (latestQuery.current !== trimmed) return;
-          setState({
-            kind: 'results',
-            results: response.results,
-            cachedOnly: response.upstream_unavailable,
-          });
-        } catch (caught) {
-          if (latestQuery.current !== trimmed) return;
-          setState({
-            kind: 'error',
-            message: caught instanceof ApiError ? caught.userMessage : 'Search failed.',
-          });
-        }
-      })();
-    }, DEBOUNCE_MS);
-
+    const timer = setTimeout(() => void runSearch(trimmed), DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [query, searchOverride]);
+  }, [query, searchOverride, runSearch]);
 
   return (
     <Screen>
@@ -145,17 +159,23 @@ export default function SearchScreen() {
       </View>
 
       <TextField
-        label="Search"
+        label={t('search.label')}
         value={query}
         onChangeText={(next) => {
           setSearchOverride(null);
           setQuery(next);
         }}
-        placeholder="Chicken breast, oats, banana…"
+        placeholder={t('search.placeholder')}
         autoCapitalize="none"
         autoCorrect={false}
         autoFocus
         returnKeyType="search"
+        // Searches now rather than waiting out the debounce, and closes the
+        // keyboard so the results are not hidden behind it.
+        onSubmitEditing={() => {
+          Keyboard.dismiss();
+          void runSearch((searchOverride ?? query).trim());
+        }}
       />
 
       {state.kind === 'idle' &&
@@ -173,23 +193,20 @@ export default function SearchScreen() {
           />
         ) : (
           <View style={styles.centered}>
-            <Text style={text.bodyMuted}>
-              Type at least {MIN_QUERY_LENGTH} characters. Results come from USDA FoodData
-              Central — every number is traceable to its source.
-            </Text>
+            <Text style={text.bodyMuted}>{t('search.hint', { count: MIN_QUERY_LENGTH })}</Text>
           </View>
         ))}
 
       {state.kind === 'searching' && (
         <View style={styles.centered}>
           <ActivityIndicator color={color.clay} />
-          <Text style={[text.bodyMuted, styles.searchingLabel]}>Searching…</Text>
+          <Text style={[text.bodyMuted, styles.searchingLabel]}>{t('search.searching')}</Text>
         </View>
       )}
 
       {state.kind === 'error' && (
         <View style={styles.callout} accessibilityRole="alert">
-          <Text style={styles.calloutTitle}>Search didn&apos;t work</Text>
+          <Text style={styles.calloutTitle}>{t('search.failedTitle')}</Text>
           <Text style={styles.calloutText}>{state.message}</Text>
         </View>
       )}
@@ -198,18 +215,25 @@ export default function SearchScreen() {
         <>
           {state.cachedOnly && (
             <View style={styles.notice}>
-              <Text style={styles.noticeText}>
-                USDA is unreachable, so these are previously cached foods only.
-              </Text>
+              <Text style={styles.noticeText}>{t('search.cachedOnly')}</Text>
             </View>
           )}
 
+          {/* Only when *every* result is a raw database row, which the API only
+              returns when nothing curated matched. Saying so is the difference
+              between a list the app stands behind and one it is passing on. */}
+          {state.results.length > 0 &&
+            state.results.every((r) => r.source === 'usda' || r.source === 'off') && (
+              <View style={styles.notice}>
+                <Text style={styles.noticeText}>{t('search.fallbackNotice')}</Text>
+              </View>
+            )}
+
           {state.results.length === 0 ? (
             <View style={styles.centered}>
-              <Text style={text.title}>No matches</Text>
+              <Text style={text.title}>{t('search.noMatches')}</Text>
               <Text style={[text.bodyMuted, styles.emptyBody]}>
-                Try a simpler term — &ldquo;oats&rdquo; rather than &ldquo;organic jumbo
-                oats&rdquo;. Brand names often only match packaged products.
+                {t('search.noMatchesBody')}
               </Text>
             </View>
           ) : (
@@ -252,7 +276,7 @@ export default function SearchScreen() {
                       {item.name}
                     </Text>
                     <Text style={styles.rowMeta} numberOfLines={1}>
-                      {item.brand ? `${item.brand} · ` : ''}per 100 g
+                      {item.brand ? `${item.brand} · ` : ''}{t('search.per100')}
                     </Text>
                     <View style={styles.rowBar}>
                       <MacroBar macros={item} scale="row" />
@@ -349,7 +373,13 @@ const styles = StyleSheet.create({
   },
   cancel: { minHeight: HIT_SLOP_MIN, justifyContent: 'center', paddingLeft: space.md },
   cancelLabel: { ...text.label, color: color.clay },
-  centered: { flex: 1, justifyContent: 'center', gap: space.sm, paddingBottom: space.xxl },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    paddingBottom: space.xxl,
+  },
   searchingLabel: { textAlign: 'center' },
   emptyBody: { lineHeight: 21 },
   list: { paddingVertical: space.md },

@@ -39,8 +39,8 @@ class LogMeal(BaseModel):
     day: date | None = None
 
 
-async def _reject_unknown(payload: MealInput) -> None:
-    missing = await unknown_slugs(payload)
+async def _reject_unknown(session: AsyncSession, payload: MealInput) -> None:
+    missing = await unknown_slugs(session, payload)
     if missing:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -49,28 +49,30 @@ async def _reject_unknown(payload: MealInput) -> None:
 
 
 @router.get("", response_model=list[MealRead], summary="Your saved meals")
-async def list_all(user: CurrentUser) -> list[MealRead]:
-    return [await to_read(doc) for doc in await list_meals(str(user.id))]
+async def list_all(user: CurrentUser, session: SessionDep) -> list[MealRead]:
+    return [to_read(meal) for meal in await list_meals(session, user.id)]
 
 
 @router.post(
     "", response_model=MealRead, status_code=status.HTTP_201_CREATED, summary="Compose a meal"
 )
-async def create(payload: MealInput, user: CurrentUser) -> MealRead:
-    await _reject_unknown(payload)
-    return await to_read(await create_meal(str(user.id), payload))
+async def create(payload: MealInput, user: CurrentUser, session: SessionDep) -> MealRead:
+    await _reject_unknown(session, payload)
+    return to_read(await create_meal(session, user.id, payload))
 
 
 @router.get("/{meal_id}", response_model=MealRead, summary="Meal detail")
-async def read_one(meal_id: str, user: CurrentUser) -> MealRead:
-    doc = await get_meal(str(user.id), meal_id)
-    if doc is None:
+async def read_one(meal_id: str, user: CurrentUser, session: SessionDep) -> MealRead:
+    meal = await get_meal(session, user.id, meal_id)
+    if meal is None:
         raise MEAL_NOT_FOUND
-    return await to_read(doc)
+    return to_read(meal)
 
 
 @router.put("/{meal_id}", response_model=MealRead, summary="Replace a meal")
-async def update(meal_id: str, payload: MealInput, user: CurrentUser) -> MealRead:
+async def update(
+    meal_id: str, payload: MealInput, user: CurrentUser, session: SessionDep
+) -> MealRead:
     """Replace the name and the whole ingredient list.
 
     A full replacement rather than a patch, for the same reason recipes work this
@@ -80,16 +82,16 @@ async def update(meal_id: str, payload: MealInput, user: CurrentUser) -> MealRea
 
     Already-logged diary entries are untouched — they carry their own snapshot.
     """
-    await _reject_unknown(payload)
-    doc = await replace_meal(str(user.id), meal_id, payload)
-    if doc is None:
+    await _reject_unknown(session, payload)
+    meal = await replace_meal(session, user.id, meal_id, payload)
+    if meal is None:
         raise MEAL_NOT_FOUND
-    return await to_read(doc)
+    return to_read(meal)
 
 
 @router.delete("/{meal_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a meal")
-async def remove(meal_id: str, user: CurrentUser) -> None:
-    if not await delete_meal(str(user.id), meal_id):
+async def remove(meal_id: str, user: CurrentUser, session: SessionDep) -> None:
+    if not await delete_meal(session, user.id, meal_id):
         raise MEAL_NOT_FOUND
 
 
@@ -114,11 +116,11 @@ async def log(
     one is as complete as any other. Editing or deleting the meal afterwards
     leaves this record exactly as it was, which is the entire point.
     """
-    doc = await get_meal(str(user.id), meal_id)
-    if doc is None:
+    row = await get_meal(session, user.id, meal_id)
+    if row is None:
         raise MEAL_NOT_FOUND
 
-    meal = await to_read(doc)
+    meal = to_read(row)
     if not meal.items:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

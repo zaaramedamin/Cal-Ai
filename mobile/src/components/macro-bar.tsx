@@ -21,6 +21,7 @@
 
 import { StyleSheet, Text, View } from 'react-native';
 
+import { useT } from '@/i18n';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -58,6 +59,7 @@ export function MacroBar({
   showLegend = scale === 'hero',
   targetCalories,
 }: MacroBarProps) {
+  const t = useT();
   const kcal = {
     protein: macros.protein_g * KCAL_PER_GRAM.protein,
     carbs: macros.carbs_g * KCAL_PER_GRAM.carbs,
@@ -80,9 +82,12 @@ export function MacroBar({
         accessibilityRole="progressbar"
         accessibilityLabel={
           isEmpty
-            ? 'No macros logged yet'
-            : `Protein ${macros.protein_g} grams, carbohydrate ${macros.carbs_g} grams, ` +
-              `fat ${macros.fat_g} grams`
+            ? t('macro.noneLogged')
+            : t('macro.reading', {
+                protein: macros.protein_g,
+                carbs: macros.carbs_g,
+                fat: macros.fat_g,
+              })
         }
       >
         {!isEmpty && (
@@ -103,9 +108,13 @@ export function MacroBar({
 
       {showLegend && (
         <View style={styles.legend}>
-          <LegendItem swatch={color.protein} label="P" grams={macros.protein_g} />
-          <LegendItem swatch={color.carbs} label="C" grams={macros.carbs_g} />
-          <LegendItem swatch={color.fat} label="F" grams={macros.fat_g} />
+          <LegendItem
+            swatch={color.protein}
+            label={t('macro.proteinShort')}
+            grams={macros.protein_g}
+          />
+          <LegendItem swatch={color.carbs} label={t('macro.carbsShort')} grams={macros.carbs_g} />
+          <LegendItem swatch={color.fat} label={t('macro.fatShort')} grams={macros.fat_g} />
         </View>
       )}
     </View>

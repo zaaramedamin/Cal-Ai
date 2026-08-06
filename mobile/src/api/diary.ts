@@ -16,20 +16,6 @@ export type MealSlot = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
 export const MEAL_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner', 'snack'];
 
-/**
- * English meal-slot labels.
- *
- * @deprecated No screen uses this any more — slot names come from the
- * dictionary via `t('slot.breakfast')`, so they translate. Kept only because it
- * is part of this module's public shape; delete it once nothing imports it.
- */
-export const MEAL_LABELS: Record<MealSlot, string> = {
-  breakfast: 'Breakfast',
-  lunch: 'Lunch',
-  dinner: 'Dinner',
-  snack: 'Snacks',
-};
-
 export interface FoodSearchResult {
   id: string;
   source: string;
@@ -61,6 +47,13 @@ export interface Food extends FoodSearchResult {
   saturated_fat_g: number | null;
   fibre_g: number | null;
   sodium_mg: number | null;
+  /**
+   * Set when a report against this food was upheld and it was pulled from
+   * search. Non-null means the numbers below are ones we no longer stand
+   * behind — the food is still reachable so an old diary entry renders, and the
+   * screen has to say why rather than look normal.
+   */
+  withdrawn_reason: string | null;
   portions: Portion[];
 }
 
@@ -140,6 +133,44 @@ export function getQuickAdd(): Promise<QuickAddFood[]> {
 
 export function getFood(foodId: string): Promise<Food> {
   return apiRequest<Food>(`/api/v1/foods/${foodId}`, { authenticated: true });
+}
+
+/**
+ * Resolve a barcode to a food.
+ *
+ * The server caches the product on first lookup, so a second scan of the same
+ * tin is a local read. That matters beyond speed: Open Food Facts records get
+ * edited, and re-fetching could change the numbers under a diary entry that
+ * already references them.
+ */
+export function getFoodByBarcode(barcode: string): Promise<Food> {
+  return apiRequest<Food>(`/api/v1/foods/barcode/${barcode}`, { authenticated: true });
+}
+
+export interface CustomFoodInput {
+  name: string;
+  brand: string | null;
+  /** Set when created after a failed scan, so a rescan finds it. */
+  barcode: string | null;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  /** Null means the label did not state it — never zero. */
+  sugars_g: number | null;
+  saturated_fat_g: number | null;
+  fibre_g: number | null;
+  sodium_mg: number | null;
+  serving_grams: number | null;
+}
+
+/** Create a food from a label. Private to the account that made it. */
+export function createCustomFood(input: CustomFoodInput): Promise<Food> {
+  return apiRequest<Food>('/api/v1/foods', {
+    method: 'POST',
+    authenticated: true,
+    body: input,
+  });
 }
 
 export function getDay(day?: string): Promise<DaySummary> {

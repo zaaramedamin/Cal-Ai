@@ -23,7 +23,7 @@ import {
   View,
 } from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import {
   type CatalogueFood,
   type CatalogueSection,
@@ -70,7 +70,7 @@ export default function CatalogueScreen() {
     } catch (caught) {
       setState({
         kind: 'error',
-        message: caught instanceof ApiError ? caught.userMessage : 'Could not load the catalogue.',
+        message: apiErrorMessage(t, caught, 'catalogue.loadFailed'),
       });
     }
   }, []);
@@ -273,7 +273,7 @@ function PortionSheet({
       await logCatalogueFood({ slug: food.slug, amount, mealSlot: slot, day });
       onLogged();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.userMessage : 'Could not log that.');
+      setError(apiErrorMessage(t, caught, 'catalogue.logFailed'));
       setBusy(false);
     }
   };
@@ -301,9 +301,9 @@ function PortionSheet({
           <Text style={styles.summaryKcal}>{kcal}</Text>
           <Text style={styles.summaryUnit}>{t('common.kcal')}</Text>
           <View style={styles.summarySpacer} />
-          <Macro label="P" value={(food.protein_g * grams) / 100} tint={color.proteinTint} />
-          <Macro label="C" value={(food.carbs_g * grams) / 100} tint={color.carbsTint} />
-          <Macro label="F" value={(food.fat_g * grams) / 100} tint={color.fatTint} />
+          <Macro label={t('macro.proteinShort')} value={(food.protein_g * grams) / 100} tint={color.proteinTint} />
+          <Macro label={t('macro.carbsShort')} value={(food.carbs_g * grams) / 100} tint={color.carbsTint} />
+          <Macro label={t('macro.fatShort')} value={(food.fat_g * grams) / 100} tint={color.fatTint} />
         </View>
 
         {error && (
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
   sheetTitles: { flex: 1, gap: 2 },
 
   summary: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  summaryKcal: { ...text.numeric, fontSize: 30 },
+  summaryKcal: { ...text.numeric, fontSize: 30, lineHeight: 38 },
   summaryUnit: { ...text.bodyMuted, marginLeft: 2 },
   summarySpacer: { flex: 1 },
   macro: {

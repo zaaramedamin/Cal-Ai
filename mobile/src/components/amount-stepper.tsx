@@ -133,6 +133,6 @@ const styles = StyleSheet.create({
   },
   stepGlyph: { ...text.title, fontSize: 22, lineHeight: 26 },
   readout: { alignItems: 'center', gap: 2 },
-  amount: { ...text.numeric, fontSize: 20 },
+  amount: { ...text.numeric, fontSize: 20, lineHeight: 26 },
   grams: { ...text.bodyMuted, fontSize: 12 },
 });

@@ -10,9 +10,13 @@ what the numbers are; neither gets to do the other's job.
 """
 
 import logging
-from typing import NamedTuple
+from datetime import UTC, datetime
+from typing import Any, NamedTuple
 
-from app.db.mongo import food_items
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.food import Food, FoodKind, FoodPortion
 from app.schemas.catalogue import CatalogueFood, Portion, UnitKind
 from app.services.usda import UnusableFood, UsdaClient, UsdaUnavailable, normalise_food
 
@@ -521,8 +525,8 @@ SEEDS: tuple[Seed, ...] = (
 
 
 async def seed_catalogue(
-    client: UsdaClient | None = None, *, force: bool = False
-) -> dict[str, int]:
+    session: AsyncSession, client: UsdaClient | None = None, *, force: bool = False
+) -> dict[str, Any]:
     """Fill in each catalogue entry's numbers from USDA.
 
     **Resumable on purpose.** Already-seeded foods are skipped unless `force`, so
@@ -534,19 +538,29 @@ async def seed_catalogue(
     the logs.
     """
     usda = client or UsdaClient()
-    tally = {"seeded": 0, "skipped": 0, "failed": 0}
+    tally: dict[str, Any] = {"seeded": 0, "skipped": 0, "failed": 0}
 
     for index, seed in enumerate(SEEDS):
-        if not force and await food_items().find_one({"slug": seed.slug}, {"_id": 1}):
+        existing = (
+            await session.execute(select(Food).where(Food.slug == seed.slug))
+        ).scalar_one_or_none()
+        if existing is not None and not force:
             tally["skipped"] += 1
             continue
 
         try:
             payloads = await usda.search(seed.query, page_size=3)
         except UsdaUnavailable as exc:
-            # Almost always the hourly limit. Stop rather than burning the rest
-            # of the list on calls that will fail the same way.
+            # Stop rather than burning the rest of the list on calls that will
+            # fail the same way.
+            #
+            # The reason is carried back to the caller rather than left to the
+            # logs. It used to be guessed at — the CLI printed "nearly always the
+            # rate limit" — and that guess was wrong the first time it mattered:
+            # the real cause was a TLS certificate that could not be verified,
+            # and the advice sent us looking at API quotas instead.
             logger.warning("USDA unavailable at %r, stopping: %s", seed.slug, exc)
+            tally["stopped_because"] = str(exc)  # type: ignore[assignment]
             break
 
         normalised = None
@@ -585,10 +599,81 @@ async def seed_catalogue(
             order=index,
         )
 
-        await food_items().update_one(
-            {"slug": seed.slug}, {"$set": food.model_dump(mode="json")}, upsert=True
-        )
+        await _upsert_catalogue_food(session, existing, food)
         tally["seeded"] += 1
         logger.info("Seeded %s from USDA %s", seed.slug, food.source_id)
 
     return tally
+
+
+async def _upsert_catalogue_food(
+    session: AsyncSession, existing: Food | None, food: CatalogueFood
+) -> Food:
+    """Write one catalogue food and replace its portions.
+
+    Portions are deleted and rewritten rather than merged. They are a small,
+    wholly-derived list, and a merge would have to decide what a "changed" portion
+    is — by label, which the curator may have reworded, or by grams, which is the
+    thing most likely to be corrected. Replacing sidesteps a question with no good
+    answer for a list of at most four rows.
+
+    **Converges on an existing cached row.** If an ordinary search already pulled
+    this FDC id into `foods`, that row is promoted to `catalogue` rather than a
+    second one being inserted. Two reasons: `uq_food_source_id` would reject the
+    duplicate anyway, and more importantly a catalogue food *is* a USDA food —
+    logging "1 verre de lait" and searching "milk" should land on one row, so any
+    diary entry already pointing at the cached row keeps working and gains the
+    curated name.
+    """
+    if existing is None:
+        existing = (
+            await session.execute(
+                select(Food).where(
+                    Food.source == food.source, Food.source_id == food.source_id
+                )
+            )
+        ).scalar_one_or_none()
+
+    row = existing or Food(source=food.source, source_id=food.source_id)
+
+    row.kind = FoodKind.CATALOGUE
+    row.slug = food.slug
+    row.source = food.source
+    row.source_id = food.source_id
+    row.name = food.name_en
+    row.name_fr = food.name_fr
+    row.category = food.category
+    row.emoji = food.emoji
+    row.sort_order = food.order
+    row.unit = food.unit.value
+    row.grams_per_unit = food.grams_per_unit
+    row.is_liquid = food.unit is UnitKind.MILLILITRES
+    row.kcal = food.kcal
+    row.protein_g = food.protein_g
+    row.carbs_g = food.carbs_g
+    row.fat_g = food.fat_g
+    row.fibre_g = food.fibre_g
+    row.sugars_g = food.sugars_g
+    row.saturated_fat_g = food.saturated_fat_g
+    row.sodium_mg = food.sodium_mg
+    row.data_fetched_at = datetime.now(UTC)
+
+    if existing is None:
+        session.add(row)
+    await session.flush()
+
+    await session.execute(delete(FoodPortion).where(FoodPortion.food_id == row.id))
+    for portion in food.portions:
+        session.add(
+            FoodPortion(
+                food_id=row.id,
+                label=portion.label_en,
+                label_fr=portion.label_fr,
+                amount=portion.amount,
+                grams=portion.grams,
+                is_default=portion.is_default,
+            )
+        )
+
+    await session.commit()
+    return row

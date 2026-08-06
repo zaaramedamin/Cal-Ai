@@ -15,46 +15,46 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pymongo.errors import PyMongoError
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import InterfaceError, OperationalError
 
 from app import __version__
+from app.admin.router import router as admin_router
 from app.api.v1 import api_router
 from app.core.config import get_settings
-from app.db.mongo import close_client, ensure_indexes
+from app.core.rate_limit_store import close_store
+from app.core.tls import use_system_trust_store
 from app.db.session import engine
 
 logger = logging.getLogger(__name__)
+
+# At import time, before anything builds an SSL context. See `core/tls.py` — on a
+# machine where antivirus or a VPN re-signs HTTPS, certifi cannot verify anything
+# and every USDA and Gemini call fails in a way that looks like the upstream
+# service being down.
+use_system_trust_store()
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Startup and shutdown.
 
-    Postgres is left alone on startup: the engine connects lazily, so eagerly
-    opening a pool here would only mean the API refuses to boot when Postgres
-    happens to be down — exactly the situation the health endpoint exists to
-    report on.
+    Nothing eager happens on startup. The engine connects lazily, so opening a
+    pool here would only mean the API refuses to boot when Postgres happens to be
+    down — exactly the situation the health endpoint exists to report on.
 
-    Mongo needs one piece of eager work, because it has no migrations: its
-    indexes have to be created *somewhere*, and doing it here means a fresh clone
-    gets a correct database from `docker compose up` with no separate setup step
-    to forget. It is idempotent and costs a few milliseconds.
+    There used to be index creation here, because MongoDB has no migrations and
+    they had to be built *somewhere*. Alembic owns that now, which is the point:
+    schema changes belong in a reviewed, ordered, reversible migration rather
+    than in a startup hook that runs on every boot and can only add.
 
-    A failure is logged and swallowed, on the same principle as Postgres. Half
-    this app — auth, the diary, progress — does not touch Mongo at all, and
-    refusing to serve any of it because an index could not be created would turn
-    a degraded dependency into a total outage.
+    Shutdown closes the Redis connection used for rate limiting, if one was ever
+    opened. It is built lazily, so on a deployment without REDIS_URL this is a
+    no-op.
     """
-    try:
-        await ensure_indexes()
-    except PyMongoError as exc:
-        logger.warning("Could not create MongoDB indexes at startup: %s", exc)
-
     yield
 
     await engine.dispose()
-    await close_client()
+    await close_store()
 
 
 def create_app() -> FastAPI:
@@ -85,25 +85,48 @@ def create_app() -> FastAPI:
     )
 
     # CORS is a *browser* mechanism: React Native issues native HTTP requests and
-    # ignores it entirely, so this does nothing for Expo Go on your phone. It
-    # matters for Expo's web target and for the /docs page. Wide open in
-    # development only; Phase 7 must set an explicit origin list before deploying.
-    if settings.is_development:
+    # ignores it entirely, so none of this affects Expo Go on a phone. It matters
+    # for Expo's web target and for the /docs page.
+    #
+    # Development stays wide open. Production sends no CORS headers at all unless
+    # CORS_ORIGINS names the origins explicitly — an empty list means no browser
+    # on another origin can read a response, which is the right default for an
+    # API whose only client is a native app. Deploying the web target is what
+    # makes setting it necessary, and at that point the value is known.
+    #
+    # `allow_credentials` follows the origin list rather than being hardcoded:
+    # the browser refuses `allow_credentials` together with `*` anyway, and this
+    # app authenticates with a bearer token rather than a cookie, so credentials
+    # are only meaningful once real origins are named.
+    origins = ["*"] if settings.is_development else settings.cors_origins
+    if origins:
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=False,
+            allow_origins=origins,
+            allow_credentials=not settings.is_development,
             allow_methods=["*"],
             allow_headers=["*"],
         )
 
-    # Both types are needed, and finding that out took a live test. asyncpg
-    # raises a bare OSError (`ConnectionRefusedError`) when it cannot reach the
-    # server at all — the connect fails before SQLAlchemy has anything to wrap.
-    # `DBAPIError` covers the other half: a pooled connection that dies mid-use,
-    # or the pre-ping failing on a stale socket. Registering only the SQLAlchemy
-    # one, which is the obvious guess, catches neither of the common cases.
-    @app.exception_handler(DBAPIError)
+    # Which exceptions mean "the database is unreachable" — and, just as
+    # importantly, which do not.
+    #
+    # `ConnectionRefusedError` is a bare OSError from asyncpg when it cannot
+    # reach the server at all; the connect fails before SQLAlchemy has anything
+    # to wrap. `OperationalError` and `InterfaceError` cover the other half: a
+    # pooled connection dying mid-use, or a pre-ping failing on a stale socket.
+    #
+    # **This used to catch `DBAPIError`, and that was a real bug.** The docstring
+    # claimed the narrower scope kept "genuine programming errors like a bad
+    # query" out — but `ProgrammingError`, `IntegrityError` and `DataError` are
+    # all DBAPIError subclasses, so it caught exactly what it said it excluded.
+    # It cost two debugging sessions in one day: a missing migration reported as
+    # "start the database", and a unique-constraint violation reported the same
+    # way while the database was plainly fine. A constraint violation is a bug in
+    # this code; saying "the database isn't reachable" sends whoever reads it to
+    # the wrong machine entirely.
+    @app.exception_handler(OperationalError)
+    @app.exception_handler(InterfaceError)
     @app.exception_handler(ConnectionRefusedError)
     async def _database_unreachable(request: Request, exc: Exception) -> JSONResponse:
         """Turn a dead database into an answer instead of a shrug.
@@ -119,10 +142,6 @@ def create_app() -> FastAPI:
         told to start separately, so restarting the API without it is a normal
         Tuesday. A JSON 503 naming the fix costs nothing and turns a debugging
         session into a single command.
-
-        Scoped to `DBAPIError` (connection and driver failures) rather than
-        `SQLAlchemyError`, which would also swallow genuine programming errors
-        like a bad query and report them as infrastructure problems.
         """
         logger.error("Database unreachable on %s %s: %s", request.method, request.url.path, exc)
         return JSONResponse(
@@ -135,33 +154,14 @@ def create_app() -> FastAPI:
             },
         )
 
-    @app.exception_handler(PyMongoError)
-    async def _mongo_unreachable(request: Request, exc: Exception) -> JSONResponse:
-        """The same courtesy for the other database.
-
-        Mongo fails differently from Postgres and would otherwise produce the
-        same useless plain-text 500: the driver waits out its five-second server
-        selection timeout and raises, the client cannot parse the body, and the
-        user gets "something went wrong on the server" while the one machine that
-        knows the answer says nothing.
-
-        Catching `PyMongoError` broadly is deliberate here, unlike the narrow
-        `DBAPIError` above. There is no equivalent of a "bad query" mistake to
-        confuse it with: nothing in this codebase builds Mongo queries from user
-        input, so in practice every error reaching this point is the connection.
-        """
-        logger.error("MongoDB unreachable on %s %s: %s", request.method, request.url.path, exc)
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={
-                "detail": (
-                    "The food catalogue database isn't reachable. If you're running "
-                    "locally, start it with `docker compose up -d` and try again."
-                )
-            },
-        )
-
     app.include_router(api_router, prefix="/api/v1")
+
+    # The admin console. Mounted outside the versioned prefix on purpose: it is
+    # a page, not part of the contract the mobile client is generated from, and
+    # it holds no privileges of its own — it signs in as an ordinary admin and
+    # calls the same endpoints the phone does. See app/admin/__init__.py.
+    app.include_router(admin_router)
+
     return app
 
 

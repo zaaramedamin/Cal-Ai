@@ -15,11 +15,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import {
   type DaySummary,
   type DiaryEntry,
@@ -32,6 +33,7 @@ import {
   logFood,
 } from '@/api/diary';
 import { type ProfileWithTargets, getProfile } from '@/api/profile';
+import { type WaterDay, getWaterDay } from '@/api/water';
 import { getProgress } from '@/api/progress';
 import { type Suggestion, getSuggestions } from '@/api/suggestions';
 import { BodyCard } from '@/components/body-avatar';
@@ -39,6 +41,9 @@ import { Card } from '@/components/card';
 import { CountUp, EnterUp, GrowBar, PressableScale } from '@/components/motion';
 import { ProgressRing } from '@/components/progress-ring';
 import { Screen } from '@/components/screen';
+import { resetSelectedDay, setSelectedDay } from '@/features/diary/selected-day';
+import { WaterCard } from '@/features/water/water-card';
+import { TAB_DOCK_HEIGHT } from '@/components/tab-bar';
 import { WeekStrip } from '@/components/week-strip';
 import { Wordmark } from '@/components/wordmark';
 import { type Translate, useT } from '@/i18n';
@@ -71,14 +76,21 @@ export default function HomeScreen() {
   const router = useRouter();
   const t = useT();
   const [day, setDay] = useState(localDateString());
+
+  // The logging button lives in the tab bar, outside this component, so the day
+  // it should log into has to be published somewhere both can see.
+  useEffect(() => {
+    setSelectedDay(day);
+    return resetSelectedDay;
+  }, [day]);
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [streak, setStreak] = useState<number | null>(null);
   const [quickAdd, setQuickAdd] = useState<QuickAddFood[]>([]);
   const [addingId, setAddingId] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [suggestionNote, setSuggestionNote] = useState<string | null>(null);
   const [body, setBody] = useState<ProfileWithTargets | null>(null);
+  const [water, setWater] = useState<WaterDay | null>(null);
 
   const reload = useCallback(async () => {
     setState({ kind: 'ready', summary: await getDay(day) });
@@ -101,7 +113,7 @@ export default function HomeScreen() {
           setState({
             kind: 'error',
             message:
-              caught instanceof ApiError ? caught.userMessage : 'Could not load your day.',
+              apiErrorMessage(t, caught, 'home.loadFailed'),
           });
         }
       })();
@@ -132,6 +144,15 @@ export default function HomeScreen() {
           if (!cancelled) setBody(profile);
         } catch {
           /* the figure simply doesn't render */
+        }
+      })();
+
+      (async () => {
+        try {
+          const today = await getWaterDay(day);
+          if (!cancelled) setWater(today);
+        } catch {
+          /* like the streak and the figure: decoration, never blocks the day */
         }
       })();
 
@@ -172,20 +193,17 @@ export default function HomeScreen() {
       setSuggestions(next.suggestions);
       setSuggestionNote(next.note);
     } catch (caught) {
-      Alert.alert(
-        'Could not log that',
-        caught instanceof ApiError ? caught.userMessage : 'Check your connection and try again.',
-      );
+      Alert.alert(t('home.logFailed'), apiErrorMessage(t, caught, 'error.tryAgain'));
     } finally {
       setAddingId(null);
     }
   }
 
   function confirmDelete(entry: DiaryEntry) {
-    Alert.alert('Delete entry?', `Remove ${entry.food_name}?`, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('home.deleteEntryTitle'), t('home.deleteEntryBody', { name: entry.food_name }), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: () => {
           void (async () => {
@@ -193,7 +211,7 @@ export default function HomeScreen() {
               await deleteEntry(entry.id);
               await reload();
             } catch {
-              Alert.alert('Could not delete that entry', 'Check your connection and try again.');
+              Alert.alert(t('home.deleteEntryFailed'), t('error.tryAgain'));
             }
           })();
         },
@@ -235,6 +253,8 @@ export default function HomeScreen() {
         <Dashboard
           summary={state.summary}
           body={body}
+          water={water}
+          onWaterChange={setWater}
           quickAdd={quickAdd}
           suggestions={suggestions}
           suggestionNote={suggestionNote}
@@ -244,71 +264,6 @@ export default function HomeScreen() {
         />
       )}
 
-      {menuOpen && (
-        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)}>
-          <Pressable
-            onPress={() => setMenuOpen(false)}
-            accessibilityLabel="Close menu"
-            style={styles.scrim}
-          />
-        </Animated.View>
-      )}
-
-      {menuOpen && (
-        <Animated.View
-          entering={FadeIn.duration(160)}
-          exiting={FadeOut.duration(120)}
-          style={styles.menu}
-        >
-          <FabAction
-            icon="camera"
-            label={t('home.scanMeal')}
-            onPress={() => {
-              setMenuOpen(false);
-              router.push({ pathname: '/scan', params: { day } });
-            }}
-          />
-          {/* Ordered above search on purpose. The catalogue is the path that
-              works for someone who does not already know what USDA calls their
-              food, which is most people most of the time; search is the escape
-              hatch for the thing the catalogue does not carry. */}
-          <FabAction
-            icon="restaurant"
-            label={t('home.myMeals')}
-            onPress={() => {
-              setMenuOpen(false);
-              router.push('/meals');
-            }}
-          />
-          <FabAction
-            icon="nutrition"
-            label={t('home.ingredients')}
-            onPress={() => {
-              setMenuOpen(false);
-              router.push({ pathname: '/catalogue', params: { slot: slotForNow(), day } });
-            }}
-          />
-          <FabAction
-            icon="search"
-            label={t('home.searchFood')}
-            onPress={() => {
-              setMenuOpen(false);
-              router.push({ pathname: '/search', params: { slot: slotForNow(), day } });
-            }}
-          />
-        </Animated.View>
-      )}
-
-      <PressableScale
-        onPress={() => setMenuOpen((open) => !open)}
-        accessibilityRole="button"
-        accessibilityLabel={menuOpen ? 'Close log menu' : 'Log food'}
-        accessibilityState={{ expanded: menuOpen }}
-        style={styles.fab}
-        scaleTo={0.92}
-      >
-        <Ionicons name={menuOpen ? 'close' : 'add'} size={30} color={color.onDark} />
-      </PressableScale>
     </Screen>
   );
 }
@@ -345,6 +300,8 @@ function FabAction({
 function Dashboard({
   summary,
   body,
+  water,
+  onWaterChange,
   quickAdd,
   suggestions,
   suggestionNote,
@@ -356,6 +313,9 @@ function Dashboard({
   /** Null while the profile is loading, or if it failed — the figure is
       decoration in the strict sense and must never block the day. */
   body: ProfileWithTargets | null;
+  /** Same rule: null while loading or on failure, and the card is simply absent. */
+  water: WaterDay | null;
+  onWaterChange: (day: WaterDay) => void;
   quickAdd: QuickAddFood[];
   suggestions: Suggestion[];
   suggestionNote: string | null;
@@ -434,8 +394,14 @@ function Dashboard({
       {/* Below the ring and the macros on purpose. Those answer "what can I eat
           now", which is why someone opened the app; this answers "where am I",
           which is a slower question and does not belong above the fast one. */}
-      {body && (
+      {water && (
         <EnterUp index={2}>
+          <WaterCard day={water} onChange={onWaterChange} />
+        </EnterUp>
+      )}
+
+      {body && (
+        <EnterUp index={3}>
           <BodyCard
             heightCm={body.profile.height_cm}
             weightKg={body.current_weight_kg}
@@ -526,11 +492,11 @@ function Dashboard({
             {photo('emptyDiary') && (
               <Image source={photo('emptyDiary')!} style={styles.emptyPhoto} resizeMode="cover" />
             )}
-            <Text style={text.label}>Nothing logged yet</Text>
+            <Text style={text.label}>{t('home.nothingYet')}</Text>
             <Text style={[text.bodyMuted, styles.emptyBody]}>
               {quickAdd.length > 0
-                ? 'Tap one of your usuals above, or use + to scan a meal.'
-                : 'Tap + to photograph a meal or search for a food.'}
+                ? t('home.emptyUsuals')
+                : t('home.emptyFresh')}
             </Text>
           </Card>
         </EnterUp>
@@ -540,7 +506,7 @@ function Dashboard({
             <PressableScale
               onLongPress={() => onDelete(entry)}
               accessibilityRole="button"
-              accessibilityHint="Long press to delete"
+              accessibilityHint={t('home.longPressDelete')}
               scaleTo={0.985}
             >
               <Card style={styles.entryCard}>
@@ -683,7 +649,8 @@ const styles = StyleSheet.create({
   },
   streakCount: { ...text.numeric, fontSize: 15, color: color.flame },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  scroll: { paddingTop: space.lg, paddingBottom: 110, gap: space.md },
+  // Clears the floating tab bar, which overlays the content.
+  scroll: { paddingTop: space.lg, paddingBottom: TAB_DOCK_HEIGHT + space.xl, gap: space.md },
   errorCard: { marginTop: space.lg },
   errorBody: { marginTop: space.xs },
 

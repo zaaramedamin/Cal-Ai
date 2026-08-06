@@ -14,6 +14,45 @@ class PortionRead(BaseModel):
     is_default: bool
 
 
+class CustomFoodInput(BaseModel):
+    """A food the user is entering from a label themselves.
+
+    **This is the second place a number enters the app without a measurement
+    behind it**, and unlike the AI estimate it is not a guess — it is a person
+    copying the nutrition panel in front of them. That is a stronger claim than
+    an inferred one, and a weaker one than USDA, so it is stored under its own
+    source and labelled wherever it is shown.
+
+    Every field is per 100 g, matching every other food in the database. Asking
+    for "per serving" would mean converting on the way in, and a conversion the
+    user cannot see is a conversion they cannot check.
+    """
+
+    name: str = Field(min_length=1, max_length=120)
+    brand: str | None = Field(default=None, max_length=120)
+    #: The barcode, when this is being created after a failed scan. Stored so a
+    #: second scan of the same product finds the user's own entry rather than
+    #: dead-ending again.
+    barcode: str | None = Field(default=None, pattern=r"^\d{6,14}$")
+
+    is_liquid: bool = False
+
+    kcal: float = Field(ge=0, le=900)
+    protein_g: float = Field(ge=0, le=100)
+    carbs_g: float = Field(ge=0, le=100)
+    fat_g: float = Field(ge=0, le=100)
+
+    # Optional stay optional. A label that does not state fibre must produce a
+    # null here, not a zero — the same rule every other source follows.
+    sugars_g: float | None = Field(default=None, ge=0, le=100)
+    saturated_fat_g: float | None = Field(default=None, ge=0, le=100)
+    fibre_g: float | None = Field(default=None, ge=0, le=100)
+    sodium_mg: float | None = Field(default=None, ge=0, le=100_000)
+
+    #: The serving size on the pack, if there is one.
+    serving_grams: float | None = Field(default=None, gt=0, le=1000)
+
+
 class FoodRead(BaseModel):
     """A food, per 100 g or 100 ml.
 
@@ -41,6 +80,14 @@ class FoodRead(BaseModel):
     saturated_fat_g: float | None
     fibre_g: float | None
     sodium_mg: float | None
+
+    #: Set when a report was upheld and the food was pulled from search.
+    #:
+    #: Sent rather than the row being hidden outright, because a withdrawn food
+    #: is usually already in somebody's diary and that entry still has to render.
+    #: What changes is that the screen says so — a past entry is a record of what
+    #: was logged, not a number the app is still standing behind.
+    withdrawn_reason: str | None = None
 
     portions: list[PortionRead] = Field(default_factory=list)
 

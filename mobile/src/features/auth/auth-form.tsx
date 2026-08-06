@@ -10,6 +10,7 @@
 import { Link } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -19,8 +20,9 @@ import {
   View,
 } from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { authErrorKey } from '@/auth/errors';
 import { AuthHero } from '@/components/auth-hero';
+import { photo } from '@/theme/imagery';
 import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
@@ -87,17 +89,17 @@ export function AuthForm({
     if (!email.trim()) {
       errors.email = t('auth.needEmail');
     } else if (!email.includes('@') || !email.includes('.')) {
-      errors.email = "That doesn't look like an email address.";
+      errors.email = t('auth.badEmail');
     }
 
     if (!password) {
       errors.password = t('auth.needPassword');
     } else if (requireConfirmation && password.length < PASSWORD_MIN_LENGTH) {
-      errors.password = `Use at least ${PASSWORD_MIN_LENGTH} characters.`;
+      errors.password = t('auth.useAtLeast', { count: PASSWORD_MIN_LENGTH });
     }
 
     if (requireConfirmation && password !== confirmation) {
-      errors.confirmation = "Those passwords don't match.";
+      errors.confirmation = t('auth.passwordsDiffer');
     }
 
     setFieldErrors(errors);
@@ -115,11 +117,10 @@ export function AuthForm({
       // status changes, so success needs no explicit route push — and cannot
       // race with the redirect.
     } catch (error) {
-      setFormError(
-        error instanceof ApiError
-          ? error.userMessage
-          : t('common.error'),
-      );
+      // The real reason, not a guess. See `auth/errors.ts` — this used to
+      // flatten every failure, including an unconfigured build, into one
+      // meaningless sentence.
+      setFormError(t(authErrorKey(error)));
     } finally {
       setSubmitting(false);
     }
@@ -142,8 +143,16 @@ export function AuthForm({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <AuthHero strapline={strapline} />
+          {/* TOP — the photograph, full bleed. */}
+          <View style={styles.top}>
+            {photo('authHero') ? (
+              <Image source={photo('authHero')!} style={styles.topPhoto} resizeMode="cover" />
+            ) : (
+              <AuthHero strapline={strapline} />
+            )}
+          </View>
 
+          {/* MAIN — the form. */}
           <View style={styles.body}>
             <Text style={text.title}>{title}</Text>
             <Text style={[text.bodyMuted, styles.subtitle]}>{subtitle}</Text>
@@ -228,12 +237,14 @@ export function AuthForm({
               />
             </View>
 
-            <View style={styles.footer}>
-              <Text style={text.bodyMuted}>{footerText} </Text>
-              <Link href={footerHref} replace style={styles.footerLink}>
-                {footerLinkLabel}
-              </Link>
-            </View>
+          </View>
+
+          {/* FOOTER — the other way in. */}
+          <View style={styles.footer}>
+            <Text style={text.bodyMuted}>{footerText} </Text>
+            <Link href={footerHref} replace style={styles.footerLink}>
+              {footerLinkLabel}
+            </Link>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -247,10 +258,18 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: space.xxl,
   },
-  // The hero bleeds to the screen edges, so the form below needs its own
-  // breathing room rather than inheriting the header's flush alignment.
-  // Clears the preview card that hangs out of the hero's bottom edge.
-  body: { paddingTop: 104 },
+  top: { width: '100%' },
+  topPhoto: { width: '100%', height: 260 },
+  // The sheet the form sits on, lifted over the photo's lower edge so the two
+  // read as one surface rather than two stacked rectangles.
+  body: {
+    marginTop: -28,
+    backgroundColor: color.paper,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: space.lg,
+    paddingTop: space.xl,
+  },
   subtitle: {
     marginTop: space.sm,
     marginBottom: space.xl,
@@ -283,10 +302,13 @@ const styles = StyleSheet.create({
     marginTop: space.xl,
   },
   footer: {
-    marginTop: space.xl,
+    marginTop: 'auto',
+    paddingTop: space.xl,
+    paddingHorizontal: space.lg,
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   footerLink: {
     ...text.label,

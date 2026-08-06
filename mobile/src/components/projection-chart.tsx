@@ -18,6 +18,7 @@
 import Svg, { Defs, LinearGradient, Path, Stop, Circle } from 'react-native-svg';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { useT } from '@/i18n';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -70,6 +71,8 @@ export function ProjectionChart({
   endLabel,
   height = 190,
 }: ProjectionChartProps) {
+  const t = useT();
+
   // Fixed viewBox with preserveAspectRatio off: the SVG scales to whatever width
   // the card gives it, so the chart never needs to measure its own layout.
   const W = 320;
@@ -135,9 +138,9 @@ export function ProjectionChart({
         </Text>
       </View>
 
-      <Text style={[styles.axis, styles.axisLeft]}>Now</Text>
+      <Text style={[styles.axis, styles.axisLeft]}>{t('chart.now')}</Text>
       <Text style={[styles.axis, styles.axisRight]}>{endLabel}</Text>
-      <Text style={styles.withoutLabel}>Without Cal Ai</Text>
+      <Text style={styles.withoutLabel}>{t('chart.without')}</Text>
     </View>
   );
 }

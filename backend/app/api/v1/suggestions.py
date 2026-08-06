@@ -164,7 +164,7 @@ async def _candidate_foods(session: AsyncSession, user_id) -> list[Food]:
     # suggestions panel must not be able to spend the shared upstream budget,
     # since it renders on a screen the user did not ask a question on.
     for entry in POPULAR_FOODS[:CURATED_SAMPLE]:
-        for food in await search_local(session, entry.search_term, limit=3):
+        for food in await search_local(session, entry.search_term, 3, user_id):
             if food.id in seen or not _is_plausible_match(entry.search_term, food.name):
                 continue
             seen.add(food.id)

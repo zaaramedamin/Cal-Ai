@@ -18,9 +18,11 @@ from app.api.v1 import (
     profile,
     progress,
     recipes,
+    review,
     scan,
     suggestions,
     users,
+    water,
 )
 
 api_router = APIRouter()
@@ -33,6 +35,8 @@ api_router.include_router(catalogue.router)
 api_router.include_router(meals.router)
 api_router.include_router(diary.router)
 api_router.include_router(recipes.router)
+api_router.include_router(review.router)
 api_router.include_router(progress.router)
 api_router.include_router(scan.router)
 api_router.include_router(suggestions.router)
+api_router.include_router(water.router)

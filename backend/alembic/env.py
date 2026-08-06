@@ -35,7 +35,22 @@ from app.db.base import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers=False` is not optional here, and the default
+    # being True is a trap worth naming.
+    #
+    # `fileConfig` otherwise walks every logger that already exists and sets
+    # `disabled = True` on any the ini file does not mention. The app's modules
+    # are imported eleven lines above this one, so `logging.getLogger(__name__)`
+    # has already run for all of them — and alembic.ini names only alembic and
+    # sqlalchemy. The result is that running a migration in-process permanently
+    # silences every log line the application would ever emit.
+    #
+    # Found from the other end: a test asserting that a Redis outage gets logged
+    # was failing because the record was never emitted at all. The suite runs
+    # migrations at session start, so nothing this codebase logged had reached a
+    # handler in any test, ever. Nothing errored — the lines simply were not
+    # there, which is the failure mode logging is least able to report.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

@@ -18,10 +18,10 @@ Why `pydantic-settings` rather than reading `os.environ` directly:
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # config.py -> core -> app -> backend -> repo root. Resolved from __file__ rather
 # than the working directory, so uvicorn, alembic and pytest all find the same
@@ -46,17 +46,17 @@ class Settings(BaseSettings):
 
     database_url: str
 
-    # ---- MongoDB ----------------------------------------------------------
-    # Holds the food catalogue and, in time, everything else. Kept as a separate
-    # setting rather than derived from DATABASE_URL because the two databases
-    # will point at different hosts the moment this is deployed — a managed
-    # Postgres and a managed Mongo are never the same box.
-    #
-    # 127.0.0.1 rather than localhost for the reason documented on DATABASE_URL:
-    # localhost resolves to ::1 first and the container publishes IPv4 only, so
-    # every connection waits for the IPv6 attempt to time out.
-    mongodb_url: str = "mongodb://calai:calai_dev_password@127.0.0.1:27017/?authSource=admin"
-    mongodb_db: str = "calai"
+    #: Where the test suite is allowed to run. Test-only, and listed here because
+    #: this class is the one place environment variables are read.
+    #:
+    #: It exists because the fixtures CREATE a database and TRUNCATE tables
+    #: between every test, and they used to derive their target from
+    #: `database_url`. That was harmless while that pointed at a local container
+    #: and became a live hazard the moment it pointed at Supabase — a single line
+    #: edited in `.env` would have aimed the suite at production. `conftest.py`
+    #: refuses to run against a host it does not recognise as local unless this
+    #: is set explicitly.
+    test_database_url: str | None = None
 
     # ---- Auth -------------------------------------------------------------
     # Signs access tokens. Rotating it invalidates every issued token at once,
@@ -90,6 +90,84 @@ class Settings(BaseSettings):
     # client forge its address and bypass every per-IP limit.
     trust_proxy_headers: bool = False
 
+    #: Serve the admin console at `/admin`.
+    #:
+    #: On by default because a review queue nobody can action is a queue that
+    #: fills up. Turning it off removes the page only — the admin API is
+    #: unchanged, and it already answers 404 to non-admins, so this is about not
+    #: advertising that the surface exists rather than about access control.
+    admin_ui_enabled: bool = True
+
+    #: Where rate-limit counters live. Empty means the memory of one process.
+    #:
+    #: That default is correct for local development and wrong the moment more
+    #: than one worker serves traffic: each keeps its own tally, so a limit of
+    #: ten becomes ten *per worker*, and a restart forgives every attacker
+    #: mid-attack. Setting this points every worker at one shared counter.
+    #:
+    #: e.g. redis://127.0.0.1:6379/0, or rediss://…@….upstash.io:6379 hosted.
+    redis_url: str = ""
+
+    # ---- Supabase Auth ------------------------------------------------------
+    #: The project URL, e.g. https://abcdefgh.supabase.co
+    #:
+    #: Empty means Supabase Auth is switched off and the hand-built auth is
+    #: still in charge — the two can coexist during the migration, and a missing
+    #: value must not stop the app booting.
+    supabase_url: str = ""
+
+    #: The publishable ("anon") key. **Not a secret**: it is compiled into the
+    #: mobile app, and Supabase's model assumes an attacker holds it. Access is
+    #: controlled by row-level security and by token verification, never by
+    #: keeping this hidden. It is here because the backend needs it to call the
+    #: auth API on a user's behalf, not to protect anything.
+    supabase_anon_key: str = ""
+
+    @property
+    def supabase_auth_enabled(self) -> bool:
+        return bool(self.supabase_url)
+
+    @property
+    def supabase_jwks_url(self) -> str:
+        """Where the public signing keys live.
+
+        Derived rather than configured. It is fixed by Supabase's URL scheme, so
+        a separate setting would only be an opportunity to mistype it.
+        """
+        return f"{self.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
+    @property
+    def supabase_issuer(self) -> str:
+        """The `iss` claim every token from this project must carry."""
+        return f"{self.supabase_url.rstrip('/')}/auth/v1"
+
+    # ---- CORS ---------------------------------------------------------------
+    #: Browser origins allowed to read responses, in production.
+    #:
+    #: Empty by default, and that default is deliberate rather than unfinished:
+    #: the only client is a native app, which does not use CORS at all, so
+    #: sending no headers denies every cross-origin browser read. Naming origins
+    #: is what deploying the Expo web target requires, and by then the value is
+    #: known — guessing it now would mean shipping a permission nobody needs.
+    #:
+    #: Set as a comma-separated list, e.g.
+    #:   CORS_ORIGINS=https://app.calai.com,https://calai.com
+    #:
+    #: `NoDecode` is required, not decorative. pydantic-settings treats any
+    #: `list[str]` as a complex field and JSON-decodes the environment value
+    #: *before* field validators run — so `CORS_ORIGINS=a,b` fails at startup
+    #: with a JSON error naming neither the variable nor the expected format.
+    #: NoDecode hands the raw string to the validator below instead.
+    cors_origins: Annotated[list[str], NoDecode] = []
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        """Accept a comma-separated string, because that is what an env var is."""
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
     # ---- Nutrition data sources -------------------------------------------
     # DEMO_KEY works but allows only 30 requests an hour, which the search screen
     # exhausts almost immediately. A real key is free.
@@ -101,6 +179,25 @@ class Settings(BaseSettings):
     # instructions — unlike SECRET_KEY this must NOT prevent boot, because the
     # rest of the app works fine without it. Free key: aistudio.google.com/apikey
     gemini_api_key: str = ""
+
+    #: A second key, used for the text paths — meal descriptions and the
+    #: nutrition-estimate fallback.
+    #:
+    #: **Why two keys rather than one.** The free tier is metered per key, so a
+    #: second one both doubles the daily budget and, more usefully, isolates the
+    #: two features from each other. With a single key, a user describing ten
+    #: meals in an afternoon exhausts the quota that photo scanning needs — and
+    #: photo scanning is the harder feature to replace, because a description can
+    #: always be typed into search instead.
+    #:
+    #: Falls back to `gemini_api_key` when unset, so one key still works and
+    #: nothing breaks by leaving this blank.
+    gemini_text_api_key: str = ""
+
+    @property
+    def gemini_key_for_text(self) -> str:
+        """The key the text paths should spend. Falls back to the photo key."""
+        return self.gemini_text_api_key or self.gemini_api_key
 
     # Flash-*lite*, and the "lite" is the whole point on a free tier.
     #
@@ -129,7 +226,7 @@ class Settings(BaseSettings):
             raise ValueError(
                 "SECRET_KEY must be a real random value of at least 32 characters. "
                 'Generate one with: python -c "import secrets; '
-                "print(secrets.token_urlsafe(64))\""
+                'print(secrets.token_urlsafe(64))"'
             )
         return value
 

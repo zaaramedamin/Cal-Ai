@@ -3,7 +3,16 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -58,6 +67,15 @@ class UserProfile(TimestampedCreation, Base):
     # diary entry belongs to. Stored on the profile rather than derived from the
     # request, because the client is not to be trusted with the date.
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+
+    #: Daily water target in millilitres, or null for "no goal set".
+    #:
+    #: Nullable with no default on purpose. Every "drink 2 litres a day" figure
+    #: in circulation is a rule of thumb, and printing one as *your* target
+    #: would be exactly the kind of confident invented number this app refuses
+    #: to produce for food. The user chooses it, and until they do the screen
+    #: shows what they drank without a denominator.
+    water_goal_ml: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
 
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None

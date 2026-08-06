@@ -15,6 +15,7 @@
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop } from 'react-native-svg';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { useT } from '@/i18n';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
@@ -55,10 +56,12 @@ export function TrendChart({
   target = null,
   unit = 'kg',
   height = 130,
-  emptyMessage = 'Log your weight a few times and the trend appears here.',
+  emptyMessage,
 }: TrendChartProps) {
+  const t = useT();
+
   if (values.length < 2) {
-    return <Text style={styles.empty}>{emptyMessage}</Text>;
+    return <Text style={styles.empty}>{emptyMessage ?? t('trend.empty')}</Text>;
   }
 
   const W = 300;
@@ -134,8 +137,12 @@ export function TrendChart({
 
       <Text style={styles.delta}>
         {first === last
-          ? 'No change yet'
-          : `${falling ? '↓' : '↑'} ${Math.abs(last - first).toFixed(1)} ${unit} so far`}
+          ? t('trend.noChange')
+          : t('trend.soFar', {
+              arrow: falling ? '↓' : '↑',
+              amount: Math.abs(last - first).toFixed(1),
+              unit,
+            })}
       </Text>
     </View>
   );

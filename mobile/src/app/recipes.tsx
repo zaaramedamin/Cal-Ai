@@ -10,16 +10,18 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import { type RecipeSummary, listRecipes } from '@/api/recipes';
 import { Button } from '@/components/button';
 import { MacroBar } from '@/components/macro-bar';
 import { Screen } from '@/components/screen';
+import { useT } from '@/i18n';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
 export default function RecipeListScreen() {
   const router = useRouter();
+  const t = useT();
   const [recipes, setRecipes] = useState<RecipeSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,27 +34,25 @@ export default function RecipeListScreen() {
           if (!cancelled) setRecipes(loaded);
         } catch (caught) {
           if (!cancelled) {
-            setError(
-              caught instanceof ApiError ? caught.userMessage : 'Could not load your recipes.',
-            );
+            setError(apiErrorMessage(t, caught, 'recipes.loadFailed'));
           }
         }
       })();
       return () => {
         cancelled = true;
       };
-    }, []),
+    }, [t]),
   );
 
   return (
     <Screen>
       <View style={styles.header}>
-        <Text style={text.overline}>Your recipes</Text>
+        <Text style={text.overline}>{t('recipes.eyebrow')}</Text>
         <Pressable onPress={() => router.back()} accessibilityRole="button">
-          <Text style={styles.link}>Done</Text>
+          <Text style={styles.link}>{t('common.done')}</Text>
         </Pressable>
       </View>
-      <Text style={text.title}>Custom meals</Text>
+      <Text style={text.title}>{t('recipes.title')}</Text>
 
       {error && (
         <View style={styles.callout} accessibilityRole="alert">
@@ -62,11 +62,8 @@ export default function RecipeListScreen() {
 
       {recipes !== null && recipes.length === 0 && (
         <View style={styles.empty}>
-          <Text style={text.heading}>Nothing saved yet</Text>
-          <Text style={[text.bodyMuted, styles.emptyBody]}>
-            Build a meal once — a chilli, a smoothie, your usual breakfast — and log it in a
-            single tap from then on.
-          </Text>
+          <Text style={text.heading}>{t('recipes.emptyTitle')}</Text>
+          <Text style={[text.bodyMuted, styles.emptyBody]}>{t('recipes.emptyBody')}</Text>
         </View>
       )}
 
@@ -86,8 +83,13 @@ export default function RecipeListScreen() {
                   {item.name}
                 </Text>
                 <Text style={styles.rowMeta}>
-                  {item.ingredient_count} ingredient{item.ingredient_count === 1 ? '' : 's'} ·{' '}
-                  {item.servings} serving{item.servings === 1 ? '' : 's'}
+                  {item.ingredient_count === 1
+                    ? t('recipes.ingredientsOne')
+                    : t('recipes.ingredientsMany', { count: item.ingredient_count })}
+                  {' · '}
+                  {item.servings === 1
+                    ? t('recipes.servingsOne')
+                    : t('recipes.servingsMany', { count: item.servings })}
                 </Text>
                 <View style={styles.rowBar}>
                   <MacroBar
@@ -102,7 +104,7 @@ export default function RecipeListScreen() {
               </View>
               <View style={styles.rowRight}>
                 <Text style={text.numeric}>{Math.round(item.kcal_per_serving)}</Text>
-                <Text style={styles.perServing}>per serving</Text>
+                <Text style={styles.perServing}>{t('recipes.perServing')}</Text>
               </View>
             </Pressable>
           )}
@@ -110,7 +112,7 @@ export default function RecipeListScreen() {
       )}
 
       <View style={styles.actions}>
-        <Button label="New recipe" onPress={() => router.push('/recipe/new')} />
+        <Button label={t('recipes.new')} onPress={() => router.push('/recipe/new')} />
       </View>
     </Screen>
   );

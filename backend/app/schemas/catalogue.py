@@ -132,3 +132,25 @@ class CatalogueResponse(BaseModel):
 
     sections: list[CatalogueSection]
     total: int
+
+
+class PhotoCredit(BaseModel):
+    """Who took one catalogue photograph, and under what terms.
+
+    CC BY and CC BY-SA both require the photographer to be credited wherever the
+    image appears. Printing that under every 110pt grid tile would bury the app in
+    small print, so the credits are collected onto one screen — which is the
+    accepted way to satisfy attribution for a set of images used decoratively.
+
+    Foods photographed for this project have no entry here. Absence means nobody
+    is owed credit, not that credit was skipped.
+    """
+
+    slug: str
+    name_en: str
+    #: Photographer, as Wikimedia Commons records them.
+    attribution: str
+    #: Short licence name, e.g. `CC BY-SA 4.0`.
+    license: str
+    #: The Commons file page — where the licence can be verified.
+    source_url: str | None = None

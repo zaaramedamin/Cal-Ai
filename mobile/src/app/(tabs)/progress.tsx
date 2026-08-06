@@ -12,14 +12,19 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import { logWeight } from '@/api/profile';
 import { type Progress, getProgress } from '@/api/progress';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { Screen } from '@/components/screen';
+import { BmiCard } from '@/features/progress/bmi-card';
+import { WeightChangesCard } from '@/features/progress/weight-changes-card';
+import { TAB_DOCK_HEIGHT } from '@/components/tab-bar';
 import { TextField } from '@/components/text-field';
 import { TrendChart } from '@/components/trend-chart';
+import { type Translate, useT } from '@/i18n';
+import { WEEKDAY_KEYS } from '@/i18n/strings';
 import { color, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
@@ -29,6 +34,7 @@ type State =
   | { kind: 'error'; message: string };
 
 export default function ProgressScreen() {
+  const t = useT();
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [weightInput, setWeightInput] = useState('');
   const [savingWeight, setSavingWeight] = useState(false);
@@ -39,11 +45,10 @@ export default function ProgressScreen() {
     } catch (caught) {
       setState({
         kind: 'error',
-        message:
-          caught instanceof ApiError ? caught.userMessage : 'Could not load your progress.',
+        message: apiErrorMessage(t, caught, 'progress.loadFailed'),
       });
     }
-  }, []);
+  }, [t]);
 
   useFocusEffect(
     useCallback(() => {
@@ -68,17 +73,17 @@ export default function ProgressScreen() {
 
   return (
     <Screen>
-      <Text style={text.title}>Progress</Text>
+      <Text style={text.title}>{t('progress.title')}</Text>
 
       {state.kind === 'loading' && (
         <View style={styles.centered}>
-          <Text style={text.bodyMuted}>Loading…</Text>
+          <Text style={text.bodyMuted}>{t('common.loading')}</Text>
         </View>
       )}
 
       {state.kind === 'error' && (
         <Card style={styles.gapTop}>
-          <Text style={text.label}>Can&apos;t load progress</Text>
+          <Text style={text.label}>{t('progress.cantLoad')}</Text>
           <Text style={[text.bodyMuted, styles.errorBody]}>{state.message}</Text>
         </Card>
       )}
@@ -92,15 +97,16 @@ export default function ProgressScreen() {
             </View>
             <View style={styles.streakText}>
               <Text style={text.heading}>
-                {state.progress.streak_days} day
-                {state.progress.streak_days === 1 ? '' : 's'} streak
+                {state.progress.streak_days === 1
+                  ? t('progress.streakOne')
+                  : t('progress.streakMany', { count: state.progress.streak_days })}
               </Text>
               <Text style={[text.bodyMuted, styles.streakSub]}>
                 {state.progress.logged_today
-                  ? 'Today is logged — keep it rolling.'
+                  ? t('progress.streakLogged')
                   : state.progress.streak_days > 0
-                    ? "Log something today to keep it alive."
-                    : 'Log a meal today to start one.'}
+                    ? t('progress.streakKeepAlive')
+                    : t('progress.streakStart')}
               </Text>
             </View>
           </Card>
@@ -108,7 +114,7 @@ export default function ProgressScreen() {
           {/* Weight */}
           <Card>
             <View style={styles.cardHeader}>
-              <Text style={text.heading}>Weight</Text>
+              <Text style={text.heading}>{t('progress.weight')}</Text>
               {state.progress.current_weight_kg !== null && (
                 <Text style={text.heading}>{state.progress.current_weight_kg} kg</Text>
               )}
@@ -117,11 +123,12 @@ export default function ProgressScreen() {
             {state.progress.target_weight_kg !== null &&
               state.progress.current_weight_kg !== null && (
                 <Text style={[text.bodyMuted, styles.goalLine]}>
-                  Goal {state.progress.target_weight_kg} kg ·{' '}
-                  {Math.abs(
-                    state.progress.current_weight_kg - state.progress.target_weight_kg,
-                  ).toFixed(1)}{' '}
-                  kg to go
+                  {t('progress.goalLine', {
+                    target: state.progress.target_weight_kg,
+                    remaining: Math.abs(
+                      state.progress.current_weight_kg - state.progress.target_weight_kg,
+                    ).toFixed(1),
+                  })}
                 </Text>
               )}
 
@@ -133,7 +140,7 @@ export default function ProgressScreen() {
             <View style={styles.weightForm}>
               <View style={styles.weightField}>
                 <TextField
-                  label="Today's weight (kg)"
+                  label={t('progress.todaysWeight')}
                   value={weightInput}
                   onChangeText={setWeightInput}
                   keyboardType="decimal-pad"
@@ -145,7 +152,7 @@ export default function ProgressScreen() {
                 />
               </View>
               <Button
-                label="Log"
+                label={t('progress.logWeight')}
                 onPress={() => void handleLogWeight()}
                 loading={savingWeight}
                 disabled={!Number(weightInput)}
@@ -153,34 +160,26 @@ export default function ProgressScreen() {
             </View>
           </Card>
 
-          {/* BMI */}
+          {/* How fast the weight is actually moving. Six subtractions, which is
+              a better answer to "am I making progress" than the chart above. */}
+          <WeightChangesCard series={state.progress.weight_series} />
+
           {state.progress.bmi !== null && state.progress.bmi_category !== null && (
-            <Card>
-              <View style={styles.cardHeader}>
-                <Text style={text.heading}>BMI</Text>
-                <Text style={text.heading}>{state.progress.bmi}</Text>
-              </View>
-              <Text style={[text.bodyMuted, styles.bmiCategory]}>
-                Your weight is{' '}
-                <Text style={styles.bmiCategoryStrong}>{state.progress.bmi_category}</Text>
-              </Text>
-              <BmiScale bmi={state.progress.bmi} />
-              <Text style={styles.bmiCaveat}>
-                BMI ignores body composition — muscular people read high. Treat it as one
-                signal, not a verdict.
-              </Text>
-            </Card>
+            <BmiCard bmi={state.progress.bmi} category={state.progress.bmi_category} />
           )}
 
           {/* This week */}
           <Card>
             <View style={styles.cardHeader}>
-              <Text style={text.heading}>This week</Text>
+              <Text style={text.heading}>{t('progress.thisWeek')}</Text>
               <Text style={[text.bodyMuted, styles.weekAvg]}>
-                avg {Math.round(state.progress.weekly_average_kcal).toLocaleString()} kcal
+                {t('progress.weekAverage', {
+                  kcal: Math.round(state.progress.weekly_average_kcal).toLocaleString(),
+                })}
               </Text>
             </View>
             <WeekBars
+              t={t}
               days={state.progress.last_7_days.map((d) => d.kcal)}
               target={state.progress.target_calories || null}
             />
@@ -236,8 +235,16 @@ function BmiScale({ bmi }: { bmi: number }) {
  * Zero-days render a stub rather than nothing, so an unlogged day is visibly a
  * gap in the week instead of a day that silently disappears.
  */
-function WeekBars({ days, target }: { days: number[]; target: number | null }) {
-  const LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+function WeekBars({
+  days,
+  target,
+  t,
+}: {
+  days: number[];
+  target: number | null;
+  t: Translate;
+}) {
+  const LETTERS = WEEKDAY_KEYS.map((key) => t(key));
   const today = new Date().getDay();
 
   // The scale has to include the target, or a week spent under it would push the
@@ -276,7 +283,7 @@ function WeekBars({ days, target }: { days: number[]; target: number | null }) {
       </View>
       {target !== null && (
         <Text style={styles.targetCaption}>
-          Dashed line: your {Math.round(target).toLocaleString()} kcal target
+          {t('progress.targetCaption', { kcal: Math.round(target).toLocaleString() })}
         </Text>
       )}
     </View>
@@ -285,7 +292,8 @@ function WeekBars({ days, target }: { days: number[]; target: number | null }) {
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  scroll: { paddingTop: space.lg, paddingBottom: space.xxl, gap: space.md },
+  // Clears the floating tab bar, which overlays the content.
+  scroll: { paddingTop: space.lg, paddingBottom: TAB_DOCK_HEIGHT + space.xl, gap: space.md },
   gapTop: { marginTop: space.lg },
   errorBody: { marginTop: space.xs },
 

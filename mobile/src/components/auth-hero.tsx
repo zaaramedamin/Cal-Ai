@@ -8,9 +8,13 @@
  * for a reason: a preview of the interface answers "what is this" before the
  * strapline gets a chance to.
  *
- * Nothing here is a photograph, which makes it dependable — it looks the same on
- * a fresh clone, needs no asset pipeline, adds no bytes, and cannot be undone by
- * a picture that happens to be too bright behind white text.
+ * **The photograph is a layer, not the design.** When `auth-hero.jpg` exists it
+ * sits behind everything, darkened by a scrim; when it does not, the panel is
+ * exactly what it was before. That ordering matters: the composition has to hold
+ * up on a fresh clone with no assets, and white text over an unknown photograph
+ * is a legibility risk that only shows up on the one image nobody tested. The
+ * scrim is what makes any photograph safe here rather than hoping for a dark
+ * one.
  *
  * The numbers are illustrative and chosen to look like a real day rather than a
  * round advertisement: 1,847 of a 2,200 target, with macros that actually sum to
@@ -18,10 +22,12 @@
  */
 
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
+import { useT } from '@/i18n';
 import { Wordmark } from '@/components/wordmark';
+import { photo } from '@/theme/imagery';
 import { color, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
@@ -29,10 +35,31 @@ import { fontFamily, text } from '@/theme/typography';
 const DEMO = { eaten: 1847, target: 2200, protein: 132, carbs: 198, fat: 61 };
 
 export function AuthHero({ strapline }: { strapline: string }) {
+  const t = useT();
   const progress = DEMO.eaten / DEMO.target;
+  const backdrop = photo('authHero');
 
   return (
     <View style={styles.wrap}>
+      {backdrop && (
+        <>
+          <Image source={backdrop} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          {/* Two layers, not one. A flat overlay at the strength needed to make
+              the wordmark legible also flattens the photograph into grey mud;
+              a gradient keeps the image readable at the top where there is no
+              text and goes dense at the bottom where the card sits. */}
+          <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 400 300">
+            <Defs>
+              <LinearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={color.ink} stopOpacity="0.45" />
+                <Stop offset="0.5" stopColor={color.ink} stopOpacity="0.65" />
+                <Stop offset="1" stopColor={color.ink} stopOpacity="0.88" />
+              </LinearGradient>
+            </Defs>
+            <Rect x="0" y="0" width="400" height="300" fill="url(#scrim)" />
+          </Svg>
+        </>
+      )}
       {/* A soft indigo bloom rather than a linear gradient. A top-to-bottom ramp
           reads as a template; an off-centre glow gives the panel a light source
           and lets the card below look like it is sitting in front of something. */}
@@ -44,7 +71,10 @@ export function AuthHero({ strapline }: { strapline: string }) {
             <Stop offset="1" stopColor={color.ink} stopOpacity="0" />
           </LinearGradient>
         </Defs>
-        <Rect x="0" y="0" width="400" height="300" fill={color.ink} />
+        {/* Only when there is no photograph — otherwise this opaque fill would
+            hide it entirely. The bloom stays either way: over an image it reads
+            as a coloured light source rather than a gradient. */}
+        {!backdrop && <Rect x="0" y="0" width="400" height="300" fill={color.ink} />}
         <Rect x="0" y="0" width="400" height="300" fill="url(#bloom)" />
       </Svg>
 
@@ -58,7 +88,7 @@ export function AuthHero({ strapline }: { strapline: string }) {
         <View style={styles.card}>
           <View style={styles.cardLeft}>
             <Text style={styles.cardValue}>{(DEMO.target - DEMO.eaten).toLocaleString()}</Text>
-            <Text style={styles.cardLabel}>calories left</Text>
+            <Text style={styles.cardLabel}>{t('home.caloriesLeft')}</Text>
             <View style={styles.chips}>
               <Chip tint={color.protein} grams={DEMO.protein} />
               <Chip tint={color.carbs} grams={DEMO.carbs} />

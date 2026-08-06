@@ -5,6 +5,7 @@ endpoint's whole purpose is to report either situation honestly. A test that
 required a live database would be testing the database; these test the contract.
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import __version__
@@ -104,3 +105,34 @@ async def test_a_dying_pooled_connection_also_says_so(client, monkeypatch) -> No
 
     assert response.status_code == 503
     assert "docker compose up -d" in response.json()["detail"]
+
+
+async def test_a_constraint_violation_is_not_reported_as_unreachable(client, monkeypatch) -> None:
+    """The bug this handler shipped with, and the reason it is now narrow.
+
+    `IntegrityError`, `ProgrammingError` and `DataError` are all `DBAPIError`
+    subclasses. The handler used to catch that base class while its own docstring
+    claimed it excluded "genuine programming errors like a bad query" — so a
+    missing migration and a duplicate-key violation both told the user to run
+    `docker compose up -d`, sending them to inspect a database that was working
+    perfectly.
+
+    A constraint violation is a bug in this code. It must surface as a 500, not
+    as advice about the infrastructure.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    async def violate(*args, **kwargs):
+        raise IntegrityError("INSERT ...", {}, Exception("duplicate key value"))
+
+    monkeypatch.setattr("sqlalchemy.ext.asyncio.AsyncSession.execute", violate)
+
+    # The assertion is that it is *not caught*. TestClient re-raises unhandled
+    # server exceptions, so an IntegrityError reaching here proves the handler
+    # declined it. Before the fix this returned a tidy 503 telling the user to
+    # start a database that was already running.
+    with pytest.raises(IntegrityError):
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "constraint@example.com", "password": "correct-horse-battery"},
+        )

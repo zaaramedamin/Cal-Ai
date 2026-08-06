@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import CITEXT
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -31,7 +31,25 @@ class User(UUIDPrimaryKey, TimestampedCreation, Base):
 
     # Length 255 is generous: an argon2id hash is ~100 characters, but the format
     # embeds its parameters, so raising the cost settings later lengthens it.
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    #
+    # **Nullable, and the null is the account type.** No hash means Supabase Auth
+    # owns this account's credentials — there is no password of ours to check.
+    # Deliberately not a separate `provider` column beside it: that would make
+    # "Supabase account that also has a local password" representable, and
+    # nothing should ever be in that state.
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    #: May review food submissions. Deliberately a plain flag rather than a role
+    #: table: there are two kinds of person here, and a permissions system built
+    #: before the second kind of admin exists is a permissions system built on a
+    #: guess about what they will need.
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    @property
+    def is_supabase_account(self) -> bool:
+        return self.password_hash is None
 
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user",

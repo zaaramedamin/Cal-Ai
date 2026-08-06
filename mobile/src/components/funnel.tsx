@@ -9,9 +9,11 @@
 
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Stop, Circle } from 'react-native-svg';
 
+import { useT } from '@/i18n';
+import { type PhotoSlot, photo } from '@/theme/imagery';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
@@ -25,12 +27,14 @@ export function FunnelHeader({
   progress: number;
   onBack: () => void;
 }) {
+  const t = useT();
+
   return (
     <View style={styles.header}>
       <Pressable
         onPress={onBack}
         accessibilityRole="button"
-        accessibilityLabel="Go back"
+        accessibilityLabel={t('a11y.goBack')}
         style={styles.backButton}
       >
         <Ionicons name="arrow-back" size={22} color={color.ink} />
@@ -53,15 +57,21 @@ export function FunnelStep({
   subtitle,
   children,
   footnote,
+  image,
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   /** Small print pinned above the action, e.g. the data-deletion promise. */
   footnote?: string;
+  /** A photograph above the heading. Omitted steps look exactly as before. */
+  image?: PhotoSlot;
 }) {
+  const picture = image ? photo(image) : null;
+
   return (
     <View style={styles.step}>
+      {picture && <Image source={picture} style={styles.stepPhoto} resizeMode="cover" />}
       <Text style={styles.stepTitle}>{title}</Text>
       {subtitle && <Text style={styles.stepSubtitle}>{subtitle}</Text>}
       {/* The body is centred in the space between heading and button, which is
@@ -182,6 +192,7 @@ const styles = StyleSheet.create({
   fill: { height: 6, borderRadius: radius.pill, backgroundColor: color.accent },
 
   step: { flex: 1 },
+  stepPhoto: { width: '100%', height: 150, borderRadius: radius.lg, marginBottom: space.lg },
   stepTitle: {
     fontFamily: fontFamily.extraBold,
     fontSize: 30,

@@ -68,6 +68,22 @@ const config: ExpoConfig = {
       },
     ],
     [
+      // Barcode scanning. Same reasoning as the picker below: this string is
+      // the only chance to say *why* before the user decides, and a bare
+      // "Cal Ai would like to access the camera" is the commonest reason a
+      // permission gets denied.
+      'expo-camera',
+      {
+        cameraPermission:
+          'Cal Ai uses the camera to read a barcode. The code is read on your device — no photograph is taken or stored.',
+        // Never recorded, so the config plugin must not add RECORD_AUDIO to the
+        // Android manifest. An unused dangerous permission is something users
+        // notice and hold against an app.
+        microphonePermission: false,
+        recordAudioAndroid: false,
+      },
+    ],
+    [
       // Meal photo scanning. The strings below are what iOS shows in the
       // permission dialog, and they are the only chance to explain *why* before
       // the user decides — a generic "CalAi would like to access the camera" is
@@ -83,6 +99,23 @@ const config: ExpoConfig = {
       },
     ],
   ],
+
+  /*
+   * Values the app needs at runtime, read through `expo-constants`.
+   *
+   * They come from the environment at *build* time, so a release build carries
+   * whatever was set when it was made. `EXPO_PUBLIC_` is Expo's convention for
+   * "this ends up in the bundle" — an honest prefix, because it does.
+   *
+   * The anon key belonging in a client bundle is not an oversight: Supabase's
+   * security model assumes an attacker has it, and controls access through token
+   * verification and row-level security. The database password, by contrast,
+   * must never come near this file.
+   */
+  extra: {
+    supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
+    supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
+  },
 
   experiments: {
     // Generates route types from the file tree, so a typo in a navigation path

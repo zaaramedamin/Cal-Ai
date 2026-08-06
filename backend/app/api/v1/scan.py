@@ -25,13 +25,14 @@ from app.core.rate_limit import RateLimit
 from app.db.models.food import Food, FoodSource
 from app.db.session import get_session
 from app.schemas.food import FoodSearchResult
-from app.schemas.scan import ScannedItem, ScanRequest, ScanResponse
+from app.schemas.scan import DescribeRequest, ScannedItem, ScanRequest, ScanResponse
 from app.services.food_cache import search_foods, upsert_estimated_food
 from app.services.vision import (
     VisionClient,
     VisionItem,
     VisionNotConfigured,
     VisionQuotaExhausted,
+    VisionResult,
     VisionUnavailable,
 )
 
@@ -142,6 +143,66 @@ async def scan_meal(
             detail="Could not analyse the photo right now. Try again in a moment.",
         ) from exc
 
+    return await _match_and_respond(result, user, session, vision)
+
+
+@router.post(
+    "/describe",
+    response_model=ScanResponse,
+    summary="Identify foods from a written description",
+    dependencies=[Depends(scan_rate_limit)],
+)
+async def describe_meal(
+    payload: DescribeRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    vision: VisionDep,
+) -> ScanResponse:
+    """Identify foods from text, then match them exactly as a photo is matched.
+
+    Shares the photo endpoint's rate limit deliberately. Both spend the same
+    shared Gemini budget, and a separate allowance would let a client exhaust the
+    quota through whichever door was left wider.
+    """
+    try:
+        result = await vision.describe_meal(payload.description)
+    except VisionNotConfigured as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Meal description is not configured on this server. "
+                "Set GEMINI_API_KEY — a free key takes a minute at "
+                "https://aistudio.google.com/apikey"
+            ),
+        ) from exc
+    except VisionQuotaExhausted as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=_quota_message(exc),
+        ) from exc
+    except VisionUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not reach the vision service. Try again in a moment.",
+        ) from exc
+
+    return await _match_and_respond(result, user, session, vision)
+
+
+async def _match_and_respond(
+    result: VisionResult,
+    user: CurrentUser,
+    session: AsyncSession,
+    vision: VisionClient,
+) -> ScanResponse:
+    """Everything after the model has named the foods.
+
+    Shared by the photo and the text endpoints, and shared deliberately: it is
+    where USDA is consulted, where the cache is tried, and where an AI estimate
+    is reached only if both fail. Two copies would eventually diverge, and the
+    half that drifted would be the one deciding whether a number is measured or
+    guessed.
+    """
     # Sequential, not gathered. One AsyncSession is not safe for concurrent use,
     # and a fan-out of eight simultaneous USDA calls would spike a shared budget
     # we are trying to spend carefully. Eight cache lookups are fast anyway.
@@ -151,7 +212,9 @@ async def scan_meal(
         # not the descriptive name it shows the user ("grilled chicken breast").
         # Food databases file things formally and the descriptive form rarely
         # matches; the bare noun usually does.
-        foods, _ = await search_foods(session, detected.query, limit=MATCH_CANDIDATES)
+        foods, _ = await search_foods(
+            session, detected.query, limit=MATCH_CANDIDATES, owner_id=user.id
+        )
         matches[index] = foods[0] if foods else None
 
     # Everything above is measured data. Below this line is the one exception,
@@ -165,9 +228,7 @@ async def scan_meal(
             detected_name=detected.name,
             estimated_grams=detected.quantity_grams,
             confidence=detected.confidence,
-            match=(
-                FoodSearchResult.model_validate(matches[index]) if matches[index] else None
-            ),
+            match=(FoodSearchResult.model_validate(matches[index]) if matches[index] else None),
         )
         for index, detected in enumerate(result.items)
     ]

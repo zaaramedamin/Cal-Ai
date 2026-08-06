@@ -201,3 +201,21 @@ export function amountStep(unit: UnitKind): number {
 export function formatAmount(amount: number): string {
   return Number.isInteger(amount) ? String(amount) : String(Number(amount.toFixed(2)));
 }
+
+/**
+ * Who took each catalogue photograph.
+ *
+ * Mirrors `GET /api/v1/catalogue/photo-credits`. Foods photographed for this
+ * project are absent from the list — nobody is owed credit for those.
+ */
+export interface PhotoCredit {
+  slug: string;
+  name_en: string;
+  attribution: string;
+  license: string;
+  source_url: string | null;
+}
+
+export function photoCredits(): Promise<PhotoCredit[]> {
+  return apiRequest<PhotoCredit[]>('/api/v1/catalogue/photo-credits');
+}

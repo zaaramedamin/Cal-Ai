@@ -51,7 +51,10 @@ function useProtectedRoute() {
     const inAuthGroup = segments[0] === '(auth)';
 
     if (status === 'unauthenticated' && !inAuthGroup) {
-      router.replace('/login');
+      // The carousel, not the login form. A first-time visitor should meet the
+      // product before a password field; a returning one taps "Sign in" on it,
+      // which is one extra tap and the reason that link is on every slide.
+      router.replace('/welcome');
     } else if (status === 'authenticated' && inAuthGroup) {
       // `replace`, not `push`: the login screen must not remain on the back
       // stack, or Android's back gesture returns to it after signing in.

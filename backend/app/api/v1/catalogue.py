@@ -13,17 +13,17 @@ from app.core.deps import CurrentUser
 from app.db.models.diary import DiaryEntry, MealSlot
 from app.db.models.profile import UserProfile
 from app.db.session import get_session
-from app.schemas.catalogue import CatalogueFood, CatalogueResponse
+from app.schemas.catalogue import CatalogueFood, CatalogueResponse, PhotoCredit
 from app.schemas.diary import DiaryEntryRead
 from app.services.catalogue import (
     format_amount,
-    get_catalogue_food,
+    get_catalogue_row,
     grams_for,
     list_catalogue,
-    materialise,
     nutrients_for,
+    to_catalogue_food,
 )
-from app.services.catalogue_photos import get_photo
+from app.services.catalogue_photos import get_photo, list_credits
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,9 @@ router = APIRouter(prefix="/catalogue", tags=["catalogue"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 #: Slugs are our own identifiers, not user text, so the pattern is a tight
-#: whitelist. It also keeps a slug out of Mongo's query operators — `{"slug":
-#: {"$ne": null}}` arriving as a path parameter is the NoSQL shape of injection,
-#: and a string that can only contain `[a-z0-9-]` cannot become a document.
+#: whitelist. Parameterised SQL makes injection a non-issue on its own; this is
+#: kept because a 404 for an obviously malformed slug is cheaper and clearer
+#: than a database round trip that was never going to match.
 SLUG = Annotated[str, Path(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")]
 
 
@@ -56,17 +56,43 @@ class LogCatalogueFood(BaseModel):
 
 
 @router.get("", response_model=CatalogueResponse, summary="Browse the food catalogue")
-async def browse(user: CurrentUser) -> CatalogueResponse:
+async def browse(user: CurrentUser, session: SessionDep) -> CatalogueResponse:
     """Every curated food, grouped into sections.
 
-    Costs no USDA budget and touches Postgres not at all: the numbers were
-    verified against FoodData Central once, at seed time, and stored with the FDC
-    id that produced them. Browsing is a read of our own database.
+    Costs no USDA budget: the numbers were verified against FoodData Central
+    once, at seed time, and stored with the FDC id that produced them. Browsing
+    is a read of our own database.
     """
-    sections = await list_catalogue()
+    sections = await list_catalogue(session)
     return CatalogueResponse(
         sections=sections, total=sum(len(section.foods) for section in sections)
     )
+
+
+@router.get(
+    "/photo-credits",
+    response_model=list[PhotoCredit],
+    summary="Who took the catalogue photographs",
+)
+async def read_photo_credits(session: SessionDep) -> list[PhotoCredit]:
+    """The attribution list the CC BY-SA licences require.
+
+    Declared **before** `/photos/{name}` and `/{slug}` on purpose. FastAPI matches
+    routes in definition order, so a literal path registered after a parameterised
+    one that could swallow it is unreachable — `/photo-credits` would arrive as
+    `slug="photo-credits"` and 404.
+    """
+    rows = await list_credits(session)
+    return [
+        PhotoCredit(
+            slug=slug,
+            name_en=name,
+            attribution=attribution,
+            license=licence or "",
+            source_url=source_url,
+        )
+        for slug, name, attribution, licence, source_url in rows
+    ]
 
 
 @router.get(
@@ -77,6 +103,7 @@ async def browse(user: CurrentUser) -> CatalogueResponse:
 )
 async def read_photo(
     name: Annotated[str, Path(pattern=r"^[a-z0-9][a-z0-9-]{0,63}-[0-9a-f]{8}\.jpg$")],
+    session: SessionDep,
 ) -> Response:
     """Serve a stored thumbnail.
 
@@ -89,25 +116,25 @@ async def read_photo(
     the bytes, so a new photo is a new URL and a stale cache is impossible. That
     is the whole reason for hashing the name rather than serving `/photos/egg`.
     """
-    photo = await get_photo(name)
+    photo = await get_photo(session, name)
     if photo is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such photo.")
 
     return Response(
-        content=photo["data"],
-        media_type=photo.get("content_type", "image/jpeg"),
+        content=photo.data,
+        media_type=photo.content_type,
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 
 @router.get("/{slug}", response_model=CatalogueFood, summary="One catalogue food")
-async def read_food(slug: SLUG, user: CurrentUser) -> CatalogueFood:
-    food = await get_catalogue_food(slug)
-    if food is None:
+async def read_food(slug: SLUG, user: CurrentUser, session: SessionDep) -> CatalogueFood:
+    row = await get_catalogue_row(session, slug)
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="That food is not in the catalogue."
         )
-    return food
+    return to_catalogue_food(row)
 
 
 @router.post(
@@ -125,11 +152,12 @@ async def log_food(
     rather than the gram weight derived from it. Both are stored: the label is
     what the diary shows, the grams are what the day's totals sum.
     """
-    food = await get_catalogue_food(slug)
-    if food is None:
+    row = await get_catalogue_row(session, slug)
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="That food is not in the catalogue."
         )
+    food = to_catalogue_food(row)
 
     profile = await session.get(UserProfile, user.id)
     if profile is None:
@@ -146,7 +174,6 @@ async def log_food(
         )
 
     grams = grams_for(food, payload.amount)
-    row = await materialise(session, food)
 
     entry = DiaryEntry(
         user_id=user.id,

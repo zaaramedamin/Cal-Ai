@@ -1,0 +1,15 @@
+1- in the home page the photo ofthe human that represent the user is not real i need a real human model right there
+
+2- in the settings resize the language buttons 
+
+3- add delete acount function and button to the application
+
+4- in new meals and the values like that in the app, modify the margin top bottom of the numbers of lcal
+
+5- always add back button from every page in the app 
+
+6- when i select an igrediant and clear all the value from the input fild the page became black also the loading display not in the midele of the page
+
+7- the description food search is not working "coundt identify foods"
+
+8- search button is broken

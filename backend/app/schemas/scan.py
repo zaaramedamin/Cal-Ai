@@ -18,6 +18,17 @@ MAX_IMAGE_BASE64_CHARS = 11_000_000
 ALLOWED_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 
 
+class DescribeRequest(BaseModel):
+    """A meal written in words rather than photographed.
+
+    Bounded at 500 characters: a meal description is a sentence or two, and the
+    limit is what stops the endpoint being used as a general-purpose prompt into
+    a shared Gemini budget.
+    """
+
+    description: str = Field(min_length=3, max_length=500)
+
+
 class ScanRequest(BaseModel):
     #: Base64 without a data-URL prefix. The app strips it before sending.
     image_base64: str = Field(min_length=64, max_length=MAX_IMAGE_BASE64_CHARS)

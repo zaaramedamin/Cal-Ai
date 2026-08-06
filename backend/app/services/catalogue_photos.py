@@ -1,4 +1,4 @@
-"""Catalogue photos, stored in MongoDB.
+"""Catalogue photos, stored in Postgres.
 
 **Why the database and not a folder on disk.** A folder means the API server has
 state that has to be backed up separately, survive a redeploy, and be shared
@@ -6,9 +6,10 @@ between instances. Thirty-five thumbnails at ~20 KB is under a megabyte in total
 — small enough that putting them where the rest of the catalogue already lives
 removes a whole category of deployment problem for no meaningful cost.
 
-Not GridFS, for the same reason. GridFS exists to chunk files past the 16 MB
-document limit; these are two orders of magnitude below it, and chunking would
-add a second collection and a join to read one thumbnail.
+A `bytea` column rather than an object store, for the same reason. Supabase
+Storage and S3 exist for files that outgrow a row; these do not come close, and
+using one would add a second system to configure, secure and back up in exchange
+for nothing.
 
 **Every image is decoded and re-encoded on the way in.** That does three jobs at
 once: it caps the size, it normalises everything to one format so the serving
@@ -19,17 +20,14 @@ are bytes we generated rather than a file someone handed us.
 import hashlib
 import io
 import logging
-from datetime import UTC, datetime
-from typing import Any
 
 from PIL import Image, UnidentifiedImageError
-from pymongo import ASCENDING, IndexModel
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.mongo import food_items, get_db
+from app.db.models.food import Food, FoodPhoto
 
 logger = logging.getLogger(__name__)
-
-PHOTOS = "catalogue_photos"
 
 #: Longest edge after resizing. A tile renders about 110pt wide, so 512px covers
 #: a 3x screen and the larger sheet header with room to spare. Going higher
@@ -48,29 +46,6 @@ MAX_SOURCE_PIXELS = 80_000_000
 
 class UnusablePhoto(ValueError):
     """The file is not an image we can use. Carries a reason worth showing."""
-
-
-def photos(database: Any = None) -> Any:
-    """The photo collection, optionally on a caller-supplied database handle.
-
-    The parameter exists for tests. A motor client binds to the event loop that
-    created it, and `TestClient` runs the app on its own — so a test that both
-    drives the API and seeds a photo directly needs to seed through *its* client,
-    not the app's. Defaulting to the app's handle keeps every production call
-    site unchanged.
-    """
-    # `is not None`, not `or`. A motor Database raises NotImplementedError on
-    # truth testing precisely to stop this idiom being written by accident.
-    return (get_db() if database is None else database)[PHOTOS]
-
-
-async def ensure_photo_indexes() -> None:
-    await photos().create_indexes(
-        [
-            IndexModel([("name", ASCENDING)], unique=True, name="uq_photo_name"),
-            IndexModel([("slug", ASCENDING)], name="ix_photo_slug"),
-        ]
-    )
 
 
 def process(raw: bytes, slug: str) -> tuple[str, bytes, int, int]:
@@ -138,38 +113,93 @@ def _apply_exif_rotation(image: Image.Image) -> Image.Image:
         return image
 
 
-async def store_photo(slug: str, raw: bytes, *, database: Any = None) -> str:
+async def store_photo(
+    session: AsyncSession,
+    slug: str,
+    raw: bytes,
+    *,
+    source_url: str | None = None,
+    license: str | None = None,  # noqa: A002 - the column is named for the concept
+    attribution: str | None = None,
+) -> str:
     """Process an image, save it, and point the food at it.
 
-    Returns the stored name. Old photos for the same slug are deleted, so
+    Returns the stored name. Older photos for the same food are deleted, so
     re-importing does not accumulate orphans nobody can reach.
-    """
-    name, data, width, height = process(raw, slug)
-    collection = photos(database)
-    foods = food_items() if database is None else database["food_items"]
 
-    await collection.update_one(
-        {"name": name},
-        {
-            "$set": {
-                "name": name,
-                "slug": slug,
-                "data": data,
-                "content_type": "image/jpeg",
-                "width": width,
-                "height": height,
-                "bytes": len(data),
-                "created_at": datetime.now(UTC),
-            }
-        },
-        upsert=True,
+    The credit arguments default to `None` because a photograph taken for this
+    project owes credit to nobody. They are stored on the row rather than logged,
+    because a CC BY-SA licence requires the credit to appear wherever the image
+    does — which means the app has to be able to read it back.
+    """
+    food = (
+        await session.execute(select(Food).where(Food.slug == slug))
+    ).scalar_one_or_none()
+    if food is None:
+        raise UnusablePhoto(f"no catalogue food called {slug!r}")
+
+    name, data, width, height = process(raw, slug)
+
+    # Delete the food's other photos first, then insert. The reverse order would
+    # delete the row we just wrote, because the new photo belongs to the same
+    # food as the old ones.
+    await session.execute(
+        FoodPhoto.__table__.delete().where(
+            FoodPhoto.food_id == food.id, FoodPhoto.name != name
+        )
     )
-    await collection.delete_many({"slug": slug, "name": {"$ne": name}})
-    await foods.update_one({"slug": slug}, {"$set": {"photo": name}})
+
+    existing = await session.get(FoodPhoto, name)
+    if existing is None:
+        session.add(
+            FoodPhoto(
+                name=name,
+                food_id=food.id,
+                data=data,
+                content_type="image/jpeg",
+                width=width,
+                height=height,
+                bytes=len(data),
+                source_url=source_url,
+                license=license,
+                attribution=attribution,
+            )
+        )
+    else:
+        # Same bytes, re-imported. The credit may still have changed — a licence
+        # corrected on Commons, say — so it is refreshed rather than left stale.
+        existing.source_url = source_url
+        existing.license = license
+        existing.attribution = attribution
+
+    await session.execute(update(Food).where(Food.id == food.id).values(photo=name))
+    await session.commit()
 
     logger.info("Stored photo %s (%d×%d, %d KB)", name, width, height, len(data) // 1024)
     return name
 
 
-async def get_photo(name: str, *, database: Any = None) -> dict[str, Any] | None:
-    return await photos(database).find_one({"name": name})
+async def get_photo(session: AsyncSession, name: str) -> FoodPhoto | None:
+    return await session.get(FoodPhoto, name)
+
+
+async def list_credits(session: AsyncSession) -> list[tuple[str, str, str, str, str | None]]:
+    """Every photo that owes somebody credit, alphabetically by food.
+
+    Rows with no attribution are excluded rather than rendered as "Unknown": a
+    photograph taken for this project owes nobody, and listing it under a credits
+    heading would imply otherwise.
+    """
+    rows = await session.execute(
+        select(
+            Food.slug,
+            Food.name,
+            FoodPhoto.attribution,
+            FoodPhoto.license,
+            FoodPhoto.source_url,
+        )
+        .join(FoodPhoto, FoodPhoto.name == Food.photo)
+        .where(FoodPhoto.attribution.is_not(None))
+        .order_by(Food.name)
+    )
+    return [tuple(row) for row in rows.all()]  # type: ignore[misc]

@@ -5,7 +5,9 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from sqlalchemy import func, select
 
+from app.db.models.food import Food, FoodPhoto
 from app.services.catalogue_photos import (
     JPEG_QUALITY,
     MAX_EDGE,
@@ -143,29 +145,40 @@ def test_quality_is_the_documented_constant() -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def test_storing_a_photo_points_the_food_at_it(mongo, catalogue) -> None:
-    name = await store_photo("egg", image_bytes(600, 600), database=mongo)
+async def test_storing_a_photo_points_the_food_at_it(session, catalogue) -> None:
+    name = await store_photo(session, "egg", image_bytes(600, 600))
 
-    food = await mongo["food_items"].find_one({"slug": "egg"})
-    assert food["photo"] == name
-    assert (await get_photo(name, database=mongo))["content_type"] == "image/jpeg"
+    food = (await session.execute(select(Food).where(Food.slug == "egg"))).scalar_one()
+    assert food.photo == name
+
+    stored = await get_photo(session, name)
+    assert stored.content_type == "image/jpeg"
+    # The foreign key is what makes a photo un-orphanable, so assert it is set
+    # rather than only that the food points back.
+    assert stored.food_id == food.id
 
 
-async def test_replacing_a_photo_removes_the_old_one(mongo, catalogue) -> None:
+async def test_replacing_a_photo_removes_the_old_one(session, catalogue) -> None:
     """Otherwise every re-import leaves an orphan nothing can reach."""
-    first = await store_photo("egg", image_bytes(600, 600, colour=(200, 120, 60)), database=mongo)
-    second = await store_photo("egg", image_bytes(600, 600, colour=(10, 200, 90)), database=mongo)
+    first = await store_photo(session, "egg", image_bytes(600, 600, colour=(200, 120, 60)))
+    second = await store_photo(session, "egg", image_bytes(600, 600, colour=(10, 200, 90)))
 
-    remaining = await mongo["catalogue_photos"].count_documents({"slug": "egg"})
+    food = (await session.execute(select(Food).where(Food.slug == "egg"))).scalar_one()
+    remaining = (
+        await session.execute(
+            select(func.count()).select_from(FoodPhoto).where(FoodPhoto.food_id == food.id)
+        )
+    ).scalar_one()
+
     assert remaining == 1
     assert first != second
-    assert await get_photo(first, database=mongo) is None
+    assert await get_photo(session, first) is None
 
 
 async def test_the_photo_is_served_with_an_immutable_cache_header(
-    client: TestClient, mongo, catalogue
+    client: TestClient, session, catalogue
 ) -> None:
-    name = await store_photo("egg", image_bytes(600, 600), database=mongo)
+    name = await store_photo(session, "egg", image_bytes(600, 600))
 
     response = client.get(f"/api/v1/catalogue/photos/{name}")
 
@@ -184,14 +197,16 @@ def test_photos_are_served_without_authentication(client: TestClient) -> None:
 
 
 def test_a_malformed_photo_name_is_rejected(client: TestClient) -> None:
-    """The name reaches a Mongo filter, so it is pattern-locked at the route."""
+    """Pattern-locked at the route, so a malformed name never reaches a query."""
     for bad in ("../../etc/passwd", "egg.jpg", "egg-XYZ.jpg", "egg-deadbeef.png"):
         assert client.get(f"/api/v1/catalogue/photos/{bad}").status_code in (404, 422)
 
 
-async def test_browsing_reports_the_photo_name(client: TestClient, mongo, catalogue) -> None:
+async def test_browsing_reports_the_photo_name(
+    client: TestClient, session, catalogue
+) -> None:
     """Which is how the app knows to render an image instead of the emoji."""
-    name = await store_photo("egg", image_bytes(600, 600), database=mongo)
+    name = await store_photo(session, "egg", image_bytes(600, 600))
     token = client.post(
         "/api/v1/auth/register", json={"email": "pics@example.com", "password": "correct-horse-b"}
     ).json()["access_token"]
@@ -202,3 +217,83 @@ async def test_browsing_reports_the_photo_name(client: TestClient, mongo, catalo
 
     egg = body["sections"][0]["foods"][0]
     assert egg["photo"] == name
+
+
+# --- attribution ----------------------------------------------------------- #
+# The catalogue photographs come from Wikimedia Commons under CC BY and CC BY-SA,
+# and both require the photographer to be named wherever the image appears. These
+# cover the path from the import argument to the endpoint the credits screen
+# reads, because a credit that is stored but unreachable satisfies nothing.
+
+
+async def test_a_stored_photo_keeps_its_credit(session, catalogue) -> None:
+    name = await store_photo(
+        session,
+        "egg",
+        image_bytes(800, 800),
+        source_url="https://commons.wikimedia.org/wiki/File:Egg.jpg",
+        license="CC BY-SA 4.0",
+        attribution="Someone / Wikimedia Commons (CC BY-SA 4.0)",
+    )
+    photo = await session.get(FoodPhoto, name)
+    assert photo is not None
+    assert photo.license == "CC BY-SA 4.0"
+    assert photo.attribution == "Someone / Wikimedia Commons (CC BY-SA 4.0)"
+    assert photo.source_url.endswith("File:Egg.jpg")
+
+
+async def test_a_photo_taken_in_house_carries_no_credit(session, catalogue) -> None:
+    """Absence must mean "nobody is owed", not "we forgot".
+
+    A NOT NULL column here would force "Unknown" onto own-work photographs, which
+    asserts something untrue about who took them.
+    """
+    name = await store_photo(session, "egg", image_bytes(800, 800))
+    photo = await session.get(FoodPhoto, name)
+    assert photo is not None
+    assert photo.attribution is None
+    assert photo.license is None
+
+
+async def test_the_credits_endpoint_lists_photos_that_owe_credit(
+    client: TestClient, session, catalogue
+) -> None:
+    await store_photo(
+        session,
+        "egg",
+        image_bytes(800, 800),
+        source_url="https://commons.wikimedia.org/wiki/File:Egg.jpg",
+        license="CC BY-SA 4.0",
+        attribution="A Photographer / Wikimedia Commons (CC BY-SA 4.0)",
+    )
+
+    response = client.get("/api/v1/catalogue/photo-credits")
+    assert response.status_code == 200
+
+    entry = next(row for row in response.json() if row["slug"] == "egg")
+    assert entry["attribution"] == "A Photographer / Wikimedia Commons (CC BY-SA 4.0)"
+    assert entry["license"] == "CC BY-SA 4.0"
+
+
+async def test_own_work_photos_are_absent_from_the_credits(
+    client: TestClient, session, catalogue
+) -> None:
+    """Listing them under a credits heading would imply a debt that is not owed."""
+    await store_photo(session, "egg", image_bytes(800, 800))
+
+    slugs = [row["slug"] for row in client.get("/api/v1/catalogue/photo-credits").json()]
+    assert "egg" not in slugs
+
+
+def test_the_credits_route_is_not_swallowed_by_the_slug_route(
+    client: TestClient,
+) -> None:
+    """FastAPI matches in definition order.
+
+    `/catalogue/{slug}` would happily accept `slug="photo-credits"` and 404,
+    which is why the literal route is registered first. Declaring it after would
+    make the endpoint unreachable while every unit test of the query still passed.
+    """
+    response = client.get("/api/v1/catalogue/photo-credits")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)

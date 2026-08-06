@@ -22,7 +22,7 @@ import {
   unitSuffix,
   updateMeal,
 } from '@/api/catalogue';
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { FoodThumb } from '@/components/food-thumb';
@@ -67,7 +67,7 @@ export default function MealBuilderScreen() {
       draftActions.reset();
       router.back();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.userMessage : 'Could not save that meal.');
+      setError(apiErrorMessage(t, caught, 'meals.saveFailed'));
       setSaving(false);
     }
   };
@@ -257,7 +257,10 @@ const styles = StyleSheet.create({
 
   totals: { gap: space.md },
   totalsHead: { flexDirection: 'row', alignItems: 'baseline', gap: space.xs },
-  totalsKcal: { ...text.numeric, fontSize: 32 },
+  // `text.numeric` is sized for 14pt and carries `lineHeight: 20`. Raising
+  // only the font size leaves the glyph taller than its own line box, which
+  // clips the digits top and bottom and reads as bad spacing.
+  totalsKcal: { ...text.numeric, fontSize: 32, lineHeight: 40 },
   totalsUnit: { ...text.bodyMuted },
   spacer: { flex: 1 },
   macros: { flexDirection: 'row', gap: space.sm },

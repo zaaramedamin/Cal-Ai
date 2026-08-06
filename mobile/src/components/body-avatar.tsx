@@ -14,7 +14,7 @@
  */
 
 import { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedProps,
@@ -24,6 +24,7 @@ import Animated, {
 import Svg, { Circle, Defs, G, LinearGradient, Path, Stop } from 'react-native-svg';
 
 import { bodyShape } from '@/features/body/shape';
+import { photo } from '@/theme/imagery';
 import { useT } from '@/i18n';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -145,6 +146,24 @@ export function BodyAvatar({ heightCm, weightKg, size = 190 }: BodyAvatarProps) 
   // off the bottom of the frame.
   const s = target.scale;
   const transform = `translate(${CENTRE * (1 - s)}, ${VIEW_H * (1 - s)}) scale(${s})`;
+
+  // A supplied photograph wins, when there is one.
+  //
+  // It is scaled by the same height factor as the drawing, so a taller person
+  // still reads as taller — but it cannot change *shape* with weight, which is
+  // what the drawn figure exists to do. See the note on `bodyFigure` in
+  // `theme/imagery.ts`: this is a deliberate trade, not an upgrade.
+  const portrait = photo('bodyFigure');
+  if (portrait) {
+    return (
+      <Image
+        source={portrait}
+        style={{ width: size * (VIEW_W / VIEW_H), height: size * s }}
+        resizeMode="contain"
+        accessibilityIgnoresInvertColors
+      />
+    );
+  }
 
   return (
     <Svg width={size * (VIEW_W / VIEW_H)} height={size} viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}>

@@ -44,6 +44,20 @@ BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 MAX_OUTPUT_TOKENS = 4096
 THINKING_BUDGET_TOKENS = 1024
 
+#: What the text path asks for, and **why it is not zero.**
+#:
+#: It used to be `thinkingBudget: 0`, on the reasoning that reading a sentence
+#: is not the same problem as counting items on a crowded plate. Current models
+#: reject that outright: `gemini-flash-latest` and `gemini-flash-lite-latest`
+#: both answer `400 INVALID_ARGUMENT` to a zero budget, so every "describe your
+#: meal" request failed with "Could not reach the vision service" — a message
+#: that sends you to check the network for a malformed request body.
+#:
+#: A small non-zero budget keeps the original intent. Thinking is capped low
+#: because the task really is simple; it is not switched off because switching
+#: it off is no longer a thing these models allow.
+TEXT_THINKING_BUDGET_TOKENS = 256
+
 #: Google's own infrastructure returns transient 503s under load — one appeared
 #: in roughly one call in three while testing this. Retrying once turns a blip
 #: into a slightly slower scan instead of a failure the user sees.
@@ -276,6 +290,28 @@ served. Rules:
 """
 
 
+DESCRIPTION_PROMPT = """You are a nutrition assistant reading a written description of a meal.
+
+Identify each distinct edible item the person describes and estimate its weight
+in grams as served. Rules:
+
+- Same naming rules as a photo: `name` describes the dish as served, and
+  `search_term` is the plainest one or two words a food database would file it
+  under.
+- Use quantities the person gave. "two eggs" is two eggs; "a bowl of rice" is a
+  typical bowl. Where they gave none, assume one ordinary serving.
+- confidence is 0 to 1. A described meal carries a *different* uncertainty from
+  a photographed one: the words are unambiguous but the portion is unseen, so be
+  guided by how specific the person was. "150 g chicken" is high confidence;
+  "some chicken" is low.
+- Do not invent items the description does not mention. If it names one food,
+  return one item.
+- If the text describes no food at all, return an empty items list and say why
+  in notes.
+- Do NOT estimate calories or nutrients. Only names and gram weights.
+"""
+
+
 def _model_json(payload: dict[str, Any]) -> dict[str, Any]:
     """Pull the model's JSON out of the generateContent envelope."""
     try:
@@ -380,6 +416,53 @@ class VisionClient:
             if self._client is None:
                 await client.aclose()
 
+    async def describe_meal(self, description: str) -> VisionResult:
+        """Identify foods from written text rather than a photograph.
+
+        Deliberately the same response schema, the same parser and the same
+        downstream pipeline as `analyse_meal`. The only thing that changes is
+        what the model is looking at — so a described meal is matched against
+        USDA, falls back to the cache, and reaches an AI estimate only as a last
+        resort, exactly as a photographed one does.
+
+        That sameness is the point. A separate path would be a second place for
+        an invented calorie to enter the system, and this schema still has no
+        field one could arrive in.
+        """
+        settings = get_settings()
+        # Checks the *effective* key, which falls back to the photo one. Naming
+        # both in the message matters: with two keys configured, "GEMINI_API_KEY
+        # is not set" would send someone to check the key that is working fine.
+        if not settings.gemini_key_for_text:
+            raise VisionNotConfigured(
+                "Neither GEMINI_TEXT_API_KEY nor GEMINI_API_KEY is set. "
+                "Get a free key at aistudio.google.com/apikey"
+            )
+
+        body = {
+            "contents": [{"parts": [{"text": f"{DESCRIPTION_PROMPT}\n\nMeal: {description}"}]}],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+                "response_schema": RESPONSE_SCHEMA,
+                "temperature": 0.2,
+                "max_output_tokens": MAX_OUTPUT_TOKENS,
+                # Lower than the photo path — reading a sentence is not the same
+                # problem as counting items on a crowded plate — but not zero.
+                # See TEXT_THINKING_BUDGET_TOKENS: zero is rejected outright.
+                "thinkingConfig": {"thinkingBudget": TEXT_THINKING_BUDGET_TOKENS},
+            },
+        }
+
+        url = f"{BASE_URL}/models/{settings.gemini_model}:generateContent"
+        client = self._client or httpx.AsyncClient(timeout=40.0)
+        try:
+            return await self._post_with_retry(
+                client, url, body, settings.gemini_key_for_text, parse=parse_vision_response
+            )
+        finally:
+            if self._client is None:
+                await client.aclose()
+
     async def estimate_nutrition(self, names: list[str]) -> dict[str, EstimatedNutrition]:
         """Ask the model for per-100 g nutrition for foods no database matched.
 
@@ -395,8 +478,10 @@ class VisionClient:
         the app already knows how to show.
         """
         settings = get_settings()
-        if not settings.gemini_api_key:
-            raise VisionNotConfigured("GEMINI_API_KEY is not set")
+        if not settings.gemini_key_for_text:
+            raise VisionNotConfigured(
+                "Neither GEMINI_TEXT_API_KEY nor GEMINI_API_KEY is set"
+            )
         if not names:
             return {}
 
@@ -418,7 +503,7 @@ class VisionClient:
         client = self._client or httpx.AsyncClient(timeout=40.0)
         try:
             payload = await self._post_with_retry(
-                client, url, body, settings.gemini_api_key, parse=_parse_nutrition
+                client, url, body, settings.gemini_key_for_text, parse=_parse_nutrition
             )
         finally:
             if self._client is None:

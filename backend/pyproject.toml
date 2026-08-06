@@ -26,7 +26,12 @@ dependencies = [
     # PyJWT rather than python-jose. python-jose has had unpatched CVEs and
     # carries a much larger surface (JWE, JWK, full JOSE); we sign and verify one
     # token type with one algorithm, and PyJWT does exactly that.
-    "pyjwt>=2.10",
+    # `[crypto]` pulls in `cryptography`, which is required for ES256 — the
+    # algorithm Supabase signs its tokens with. Without the extra, PyJWT imports
+    # fine and then raises at verification time saying the algorithm is not
+    # supported, which reads like a configuration error rather than a missing
+    # dependency.
+    "pyjwt[crypto]>=2.10",
     # Backs Pydantic's EmailStr. Validates syntax and normalises the domain.
     "email-validator>=2.2",
     # --- Phase 2: local-day resolution ---
@@ -38,21 +43,29 @@ dependencies = [
     # Async HTTP for the USDA proxy. Note this is httpx, not the httpx2 in dev
     # dependencies — that one exists solely as Starlette's test transport.
     "httpx>=0.28",
-    # --- MongoDB ---
-    # The official async driver. `motor` is the asyncio wrapper the MongoDB team
-    # maintain over pymongo, so it shares pymongo's BSON codecs and connection
-    # pooling rather than reimplementing them.
-    "motor>=3.6",
+    # Makes Python verify TLS against the operating system's certificate store
+    # instead of certifi's fixed bundle of public CAs.
+    #
+    # Not a nicety. Antivirus software and VPNs routinely terminate HTTPS and
+    # re-sign it with their own root, which they install into the OS store —
+    # invisible to certifi. The result is every outbound call failing with
+    # "certificate verify failed: unable to get local issuer certificate" on a
+    # machine where the browser works fine, which reads as the API being down.
+    # This project hit exactly that against USDA.
+    #
+    # Was arriving transitively via pip; declared here because we now import it.
+    "truststore>=0.10",
     # Resizes catalogue photos at import time. Worth a dependency: measured on a
     # 4032x3024 phone photo, 6.6 MB becomes 85 KB at 512px — so the full
     # thirty-five-food catalogue is about 3 MB of images instead of 230 MB, for
     # tiles rendered 110pt wide. Decoding and re-encoding also means the bytes
     # served back are ones we generated rather than a file someone handed us.
     "pillow>=11.0",
-    # Not a transitive-only dependency: we import ObjectId, IndexModel and the
-    # error types directly, and pinning it explicitly means a motor upgrade
-    # cannot silently move the version those come from.
-    "pymongo>=4.10",
+    # Shared rate-limit counters. Optional at runtime — the limiter falls back to
+    # per-process counting when REDIS_URL is unset — but declared as a hard
+    # dependency rather than an extra, because "your limits silently became
+    # per-worker" is not a failure anyone would notice in time.
+    "redis>=5.2",
 ]
 
 [project.optional-dependencies]

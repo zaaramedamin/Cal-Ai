@@ -19,18 +19,20 @@ import {
   View,
 } from 'react-native';
 
-import { ApiError } from '@/api/client';
+import { apiErrorMessage } from '@/api/errors';
 import { createRecipe, deleteRecipe, updateRecipe } from '@/api/recipes';
 import { Button } from '@/components/button';
 import { MacroBar } from '@/components/macro-bar';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
 import { draftActions, draftTotals, useDraftRecipe } from '@/features/recipes/draft-store';
+import { useT } from '@/i18n';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
 export function RecipeBuilder() {
   const router = useRouter();
+  const t = useT();
   const draft = useDraftRecipe();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export function RecipeBuilder() {
       draftActions.reset();
       router.replace('/recipes');
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.userMessage : 'Could not save this recipe.');
+      setError(apiErrorMessage(t, caught, 'recipe.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -65,10 +67,10 @@ export function RecipeBuilder() {
 
   function handleDelete() {
     if (!draft.id) return;
-    Alert.alert('Delete recipe?', `${draft.name} will be removed permanently.`, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('recipe.deleteTitle'), t('recipe.deleteBody', { name: draft.name }), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: () => {
           void (async () => {
@@ -77,7 +79,7 @@ export function RecipeBuilder() {
               draftActions.reset();
               router.replace('/recipes');
             } catch {
-              Alert.alert('Could not delete', 'Check your connection and try again.');
+              Alert.alert(t('recipe.deleteFailed'), t('recipe.deleteFailedBody'));
             }
           })();
         },
@@ -93,26 +95,26 @@ export function RecipeBuilder() {
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <Text style={text.overline}>{draft.id ? 'Edit recipe' : 'New recipe'}</Text>
+            <Text style={text.overline}>{draft.id ? t('recipe.edit') : t('recipe.new')}</Text>
             <Pressable onPress={() => router.back()} accessibilityRole="button">
-              <Text style={styles.link}>Cancel</Text>
+              <Text style={styles.link}>{t('common.cancel')}</Text>
             </Pressable>
           </View>
 
           <View style={styles.fields}>
             <TextField
-              label="Name"
+              label={t('recipe.name')}
               value={draft.name}
               onChangeText={draftActions.setName}
-              placeholder="Sunday chilli"
+              placeholder={t('recipe.namePlaceholder')}
               autoCapitalize="sentences"
             />
             <TextField
-              label="Servings the whole recipe makes"
+              label={t('recipe.servings')}
               value={String(draft.servings)}
               onChangeText={(value) => draftActions.setServings(Number(value) || 1)}
               keyboardType="number-pad"
-              hint="You'll log portions of this"
+              hint={t('recipe.servingsHint')}
             />
           </View>
 
@@ -121,20 +123,18 @@ export function RecipeBuilder() {
           <View style={styles.heroBlock}>
             <Text style={text.hero}>{Math.round(perServing.kcal).toLocaleString()}</Text>
             <Text style={text.overline}>
-              kcal per serving · {Math.round(total.kcal).toLocaleString()} total
+              {t('recipe.kcalPerServing', { total: Math.round(total.kcal).toLocaleString() })}
             </Text>
           </View>
 
           <MacroBar macros={perServing} scale="hero" showLegend />
 
           <Text style={[text.overline, styles.sectionLabel]}>
-            Ingredients ({draft.ingredients.length})
+            {t('recipe.ingredients', { count: draft.ingredients.length })}
           </Text>
 
           {draft.ingredients.length === 0 ? (
-            <Text style={styles.emptyText}>
-              Nothing added yet. Search for a food to start building.
-            </Text>
+            <Text style={styles.emptyText}>{t('recipe.emptyIngredients')}</Text>
           ) : (
             draft.ingredients.map((item) => (
               <View key={item.foodId} style={styles.ingredient}>
@@ -160,7 +160,7 @@ export function RecipeBuilder() {
                 <Pressable
                   onPress={() => draftActions.removeIngredient(item.foodId)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Remove ${item.name}`}
+                  accessibilityLabel={t('recipe.remove', { name: item.name })}
                   style={styles.remove}
                 >
                   <Text style={styles.removeLabel}>×</Text>
@@ -174,7 +174,7 @@ export function RecipeBuilder() {
             accessibilityRole="button"
             style={styles.addButton}
           >
-            <Text style={styles.addLabel}>+ Add ingredient</Text>
+            <Text style={styles.addLabel}>{t('recipe.addIngredient')}</Text>
           </Pressable>
 
           {error && (
@@ -185,14 +185,14 @@ export function RecipeBuilder() {
 
           <View style={styles.actions}>
             <Button
-              label={draft.id ? 'Save changes' : 'Save recipe'}
+              label={draft.id ? t('recipe.saveChanges') : t('recipe.save')}
               disabled={!canSave}
               loading={saving}
               onPress={() => void handleSave()}
             />
             {draft.id && (
               <Pressable onPress={handleDelete} accessibilityRole="button" style={styles.destroy}>
-                <Text style={styles.destroyLabel}>Delete recipe</Text>
+                <Text style={styles.destroyLabel}>{t('recipe.delete')}</Text>
               </Pressable>
             )}
           </View>
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
   },
   link: { ...text.label, color: color.clay },
   fields: { gap: space.lg },
-  heroBlock: { marginTop: space.xl, marginBottom: space.lg },
+  heroBlock: { marginTop: space.xl, marginBottom: space.xl },
   sectionLabel: { marginTop: space.xl, marginBottom: space.sm },
   emptyText: { ...text.bodyMuted, fontSize: 13, paddingVertical: space.sm },
   ingredient: {

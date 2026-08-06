@@ -1,53 +1,59 @@
-﻿/**
+/**
  * Request a password reset link.
  *
  * The success state deliberately does not confirm whether an account exists —
- * that would undo the backend's neutral response and hand anyone an
- * account-enumeration tool. The copy is written to read naturally either way.
+ * that would hand anyone an account-enumeration tool. The copy is written to
+ * read naturally either way.
+ *
+ * **What changed with Supabase.** This used to end on a "here is your token,
+ * paste it on the next screen" panel, because no mail provider was configured
+ * and the flow could not otherwise be walked through. Supabase sends a real
+ * email, so the token never passes through the app at all — the user opens the
+ * link and lands on the reset screen with a session already established.
  */
 
-import { Link, useRouter } from 'expo-router';
+import { Link } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { requestPasswordReset } from '@/api/auth';
-import { ApiError } from '@/api/client';
+import { useAuth } from '@/auth/context';
 import { Button } from '@/components/button';
 import { Screen } from '@/components/screen';
-import { Wordmark } from '@/components/wordmark';
 import { TextField } from '@/components/text-field';
+import { Wordmark } from '@/components/wordmark';
+import { authErrorKey } from '@/auth/errors';
+import { useT } from '@/i18n';
 import { color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
 
 export default function ForgotPasswordScreen() {
-  const router = useRouter();
+  const { requestPasswordReset } = useAuth();
+  const t = useT();
+
   const [email, setEmail] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
-  const [devToken, setDevToken] = useState<string | null>(null);
 
   async function handleSubmit() {
     setFormError(null);
     if (!email.trim()) {
-      setFieldError('Enter your email address.');
+      setFieldError(t('auth.needEmail'));
       return;
     }
     setFieldError(null);
 
     setSubmitting(true);
     try {
-      const result = await requestPasswordReset(email.trim());
+      await requestPasswordReset(email);
       setSent(true);
-      // Present only while there is no mail provider, so the flow can be walked
-      // through end to end in development. The backend returns null for this in
-      // any other environment.
-      setDevToken(result.debug_reset_token);
     } catch (error) {
-      setFormError(
-        error instanceof ApiError ? error.userMessage : 'Something went wrong. Please try again.',
-      );
+      // Note the asymmetry with the sign-in form: a *successful* request never
+      // reveals whether the account exists, because that would be an
+      // enumeration tool. A genuine failure — rate limit, no network, an
+      // unconfigured build — is safe to name and useless to hide.
+      setFormError(t(authErrorKey(error)));
     } finally {
       setSubmitting(false);
     }
@@ -65,43 +71,18 @@ export default function ForgotPasswordScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Wordmark size={18} />
-          <Text style={text.title}>{sent ? 'Check your email' : 'Reset your password'}</Text>
+          <Text style={text.title}>{sent ? t('auth.resetSent') : t('auth.resetTitle')}</Text>
 
           {sent ? (
-            <>
-              <Text style={[text.bodyMuted, styles.subtitle]}>
-                If an account exists for {email.trim()}, a reset link is on its way. It expires
-                in 30 minutes.
-              </Text>
-
-              {devToken && (
-                <View style={styles.devBox}>
-                  <Text style={styles.devTitle}>Development only</Text>
-                  <Text style={[text.bodyMuted, styles.devLine]}>
-                    No mail provider is configured yet, so here is the token. Paste it on the
-                    next screen.
-                  </Text>
-                  <Text selectable style={styles.devToken}>
-                    {devToken}
-                  </Text>
-                </View>
-              )}
-
-              <View style={styles.actions}>
-                <Button
-                  label="Enter reset code"
-                  onPress={() => router.push('/reset-password')}
-                />
-              </View>
-            </>
+            <Text style={[text.bodyMuted, styles.subtitle]}>
+              {t('auth.resetSentBody', { email: email.trim() })}
+            </Text>
           ) : (
             <>
-              <Text style={[text.bodyMuted, styles.subtitle]}>
-                Enter your email and we&apos;ll send you a link to set a new password.
-              </Text>
+              <Text style={[text.bodyMuted, styles.subtitle]}>{t('auth.resetSubtitle')}</Text>
 
               <TextField
-                label="Email"
+                label={t('auth.email')}
                 value={email}
                 onChangeText={setEmail}
                 error={fieldError}
@@ -123,7 +104,7 @@ export default function ForgotPasswordScreen() {
 
               <View style={styles.actions}>
                 <Button
-                  label="Send reset link"
+                  label={t('auth.resetSend')}
                   onPress={() => void handleSubmit()}
                   loading={submitting}
                 />
@@ -132,9 +113,8 @@ export default function ForgotPasswordScreen() {
           )}
 
           <View style={styles.footer}>
-            <Text style={text.bodyMuted}>Remembered it? </Text>
             <Link href="/login" replace style={styles.footerLink}>
-              Sign in
+              {t('auth.backToSignIn')}
             </Link>
           </View>
         </ScrollView>
@@ -156,17 +136,6 @@ const styles = StyleSheet.create({
     borderLeftColor: color.clayDeep,
   },
   formErrorText: { ...text.body, fontSize: 14 },
-  devBox: {
-    padding: space.lg,
-    borderRadius: radius.md,
-    backgroundColor: color.inkWash,
-    borderLeftWidth: 3,
-    borderLeftColor: color.carbs,
-    gap: space.xs,
-  },
-  devTitle: { ...text.overline, color: color.inkMuted },
-  devLine: { fontSize: 14, lineHeight: 20 },
-  devToken: { ...text.numeric, fontSize: 12, marginTop: space.xs },
   actions: { marginTop: space.xl },
   footer: {
     marginTop: space.xl,
