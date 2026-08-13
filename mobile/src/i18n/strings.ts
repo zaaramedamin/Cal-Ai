@@ -360,7 +360,7 @@ export const en = {
   'settings.sectionPreferences': 'Preferences',
   'settings.sectionAccountActions': 'Account actions',
   'settings.language': 'Language',
-  'settings.languageSystem': 'Match my device',
+  'settings.languageSystem': 'Match my\ndevice',
   'settings.languageEnglish': 'English',
   'settings.languageFrench': 'Français',
   'settings.languageNote':
@@ -1038,7 +1038,7 @@ export const fr: Dictionary = {
   'settings.sectionPreferences': 'Préférences',
   'settings.sectionAccountActions': 'Actions du compte',
   'settings.language': 'Langue',
-  'settings.languageSystem': 'Suivre mon appareil',
+  'settings.languageSystem': 'Suivre mon\nappareil',
   'settings.languageEnglish': 'English',
   'settings.languageFrench': 'Français',
   'settings.languageNote':

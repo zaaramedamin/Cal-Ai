@@ -358,26 +358,8 @@ class Food(UUIDPrimaryKey, TimestampedCreation, Base):
 
     @property
     def is_correctable(self) -> bool:
-        """Whether an admin may edit these numbers in place.
-
-        The question is not "who owns this row" but **is there an upstream that
-        will contradict us**.
-
-        *No, for USDA and Open Food Facts.* Those ids resolve to a live record
-        we re-fetch, so an edit here is overwritten on the next refresh and,
-        until then, leaves a row claiming a provenance its figures no longer
-        have. A wrong one gets withdrawn and reported upstream.
-
-        *Yes, for INNTA and Ciqual.* Those are static tables imported once from
-        a printed or published source and never re-fetched. When a reviewer
-        opens page 31, reads the real figure and types it in, that is
-        *restoring* what the table says — the OCR was the error, not the table.
-        Forbidding it would mean the only remedy for a mistyped Tunisian food is
-        deleting it from an app whose entire point is having those foods.
-
-        *Yes, for a user's own food*, which was always theirs to fix.
-        """
-        return self.source not in (FoodSource.USDA, FoodSource.OFF)
+        """Whether an admin may edit these numbers in place and republish."""
+        return True
 
     portions: Mapped[list["FoodPortion"]] = relationship(
         back_populates="food", cascade="all, delete-orphan", passive_deletes=True

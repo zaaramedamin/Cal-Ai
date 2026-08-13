@@ -77,15 +77,9 @@ const styles = StyleSheet.create({
   },
   content: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
 
-  // The indigo pill. Lifted, because the primary action should look like it
-  // sits above the page rather than being painted onto it.
-  primary: { backgroundColor: color.accent, ...elevation.mid },
-  // Same shape, no weight, accent-tinted. Reads as available but secondary.
-  secondary: { backgroundColor: color.accentTint },
+  primary: { backgroundColor: color.accent, ...elevation.accentGlow },
+  secondary: { backgroundColor: color.accentTint, borderWidth: 1, borderColor: color.hairline },
   ghost: { backgroundColor: 'transparent', minHeight: HIT_SLOP_MIN },
-  // Red and filled, for an action with no undo. Deliberately the same shape and
-  // weight as `primary`: a destructive button should be as easy to read as any
-  // other, and only its colour should argue against pressing it.
   danger: { backgroundColor: color.danger, ...elevation.mid },
 
   disabled: { opacity: 0.4 },
@@ -94,3 +88,4 @@ const styles = StyleSheet.create({
   labelOnAccent: { color: color.onDark },
   labelOnLight: { color: color.accent },
 });
+

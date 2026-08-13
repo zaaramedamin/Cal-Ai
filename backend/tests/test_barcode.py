@@ -309,3 +309,28 @@ def test_a_custom_food_keeps_a_missing_nutrient_missing(client: TestClient) -> N
     ).json()
 
     assert body["fibre_g"] is None
+
+
+def test_custom_food_barcode_lookup_resolves_approved_or_owned_food(client: TestClient) -> None:
+    """Barcode lookup finds a custom/approved food stored in database by source_id barcode."""
+    headers = registered(client, "barcode_owner@example.com")
+    use_off(UnusableProduct("No nutrition"))
+
+    created = client.post(
+        "/api/v1/foods",
+        headers=headers,
+        json={
+            "name": "Barcode Snack",
+            "barcode": "6194008555229",
+            "kcal": 250,
+            "protein_g": 8,
+            "carbs_g": 30,
+            "fat_g": 10,
+        },
+    )
+    assert created.status_code == 201
+
+    res = client.get("/api/v1/foods/barcode/6194008555229", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["name"] == "Barcode Snack"
+

@@ -157,7 +157,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
               <Ionicons
                 name={ICONS[route.name] ?? 'ellipse'}
                 size={20}
-                color={focused ? color.ink : color.inkFaint}
+                color={focused ? color.accent : color.inkFaint}
               />
               <Text style={[styles.label, focused && styles.labelActive]}>{label}</Text>
             </Pressable>
@@ -191,8 +191,7 @@ function MenuRow({
 }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" style={styles.menuRow}>
-      {/* The label is a tap target too, not just a caption — a bare icon here
-          would make the user guess which circle is which. */}
+      {/* The label is a tap target too */}
       <View style={styles.menuLabelPill}>
         <Text style={styles.menuLabel}>{label}</Text>
       </View>
@@ -231,38 +230,38 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     backgroundColor: color.surface,
     borderRadius: radius.pill,
-    paddingVertical: space.sm,
+    paddingVertical: space.xs + 2,
     paddingHorizontal: space.xs,
-    ...elevation.high,
+    borderWidth: 1,
+    borderColor: color.hairline,
+    ...elevation.glass,
   },
   tab: {
     alignItems: 'center',
-    gap: 2,
-    paddingVertical: space.xs,
-    paddingHorizontal: space.md,
+    gap: 3,
+    paddingVertical: space.xs + 2,
+    paddingHorizontal: space.md + 2,
     borderRadius: radius.pill,
   },
-  // A wash rather than a colour change alone: on a white pill, tint on the icon
-  // is easy to miss at a glance, and the filled shape reads instantly.
-  tabActive: { backgroundColor: color.wash },
+  tabActive: { backgroundColor: color.accentTintStrong },
   label: {
     fontFamily: fontFamily.semiBold,
     fontSize: 11,
     color: color.inkFaint,
   },
-  labelActive: { color: color.ink },
+  labelActive: { color: color.accent, fontFamily: fontFamily.bold },
   action: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.ink,
-    ...elevation.high,
+    backgroundColor: color.accent,
+    ...elevation.accentGlow,
   },
-  actionPressed: { opacity: 0.85 },
+  actionPressed: { opacity: 0.88, transform: [{ scale: 0.95 }] },
 
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.35)' },
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.40)' },
   menu: { position: 'absolute', right: space.md, gap: space.sm, alignItems: 'flex-end' },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   menuLabelPill: {
@@ -270,16 +269,19 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
     borderRadius: radius.pill,
     backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: color.hairline,
     ...elevation.mid,
   },
-  menuLabel: { ...text.label, fontSize: 13 },
+  menuLabel: { ...text.label, fontSize: 13, color: color.ink },
   menuIcon: {
     width: 46,
     height: 46,
     borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.ink,
-    ...elevation.mid,
+    backgroundColor: color.accent,
+    ...elevation.accentGlow,
   },
 });
+

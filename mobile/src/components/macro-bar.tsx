@@ -132,9 +132,6 @@ function LegendItem({
 }) {
   return (
     <View style={styles.legendItem}>
-      {/* The swatch carries the colour; the letter carries the meaning. Colour
-          is never the only signal — roughly 1 in 12 men cannot reliably separate
-          some of these hues. */}
       <View style={[styles.swatch, { backgroundColor: swatch }]} />
       <Text style={styles.legendLabel}>{label}</Text>
       <Text style={styles.legendValue}>{Math.round(grams)}g</Text>
@@ -149,7 +146,7 @@ const styles = StyleSheet.create({
   track: {
     flexDirection: 'row',
     overflow: 'hidden',
-    backgroundColor: color.inkWash,
+    backgroundColor: color.wash,
     width: '100%',
   },
   tick: {
@@ -157,28 +154,38 @@ const styles = StyleSheet.create({
     top: -3,
     width: 2,
     backgroundColor: color.ink,
-    opacity: 0.55,
+    opacity: 0.65,
+    borderRadius: 1,
   },
   legend: {
     flexDirection: 'row',
     marginTop: space.sm,
-    gap: space.lg,
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.xs,
+    gap: space.xs + 2,
+    backgroundColor: color.wash,
+    paddingHorizontal: space.sm + 2,
+    paddingVertical: space.xs,
+    borderRadius: radius.pill,
   },
   swatch: {
     width: 8,
     height: 8,
-    borderRadius: radius.sm,
+    borderRadius: 4,
   },
   legendLabel: {
     ...text.overline,
+    fontSize: 11,
     color: color.inkMuted,
   },
   legendValue: {
     ...text.numeric,
+    fontSize: 13,
+    color: color.ink,
   },
 });
+

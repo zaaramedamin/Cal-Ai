@@ -6,14 +6,21 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser
 from app.core.rate_limit import RateLimit
 from app.db.models.diary import DiaryEntry
-from app.db.models.food import Food, FoodKind, FoodPortion, FoodSource, UnitKind
+from app.db.models.food import (
+    Food,
+    FoodKind,
+    FoodPortion,
+    FoodSource,
+    ReviewStatus,
+    UnitKind,
+)
 from app.db.session import get_session
 from app.schemas.food import (
     CustomFoodInput,
@@ -89,37 +96,41 @@ async def by_barcode(
     existing = (
         await session.execute(
             select(Food)
-            .where(Food.source == "off", Food.source_id == barcode)
+            .where(
+                Food.source_id == barcode,
+                or_(
+                    Food.owner_id.is_(None),
+                    Food.owner_id == user.id,
+                    Food.review_status == ReviewStatus.APPROVED,
+                ),
+            )
             .options(selectinload(Food.portions))
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
     if existing is not None and not refresh:
         return FoodRead.model_validate(existing)
 
     try:
         normalised = await off.product(barcode)
-    except ProductNotFound as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            # Says what to do next. "Not found" alone leaves the user staring at
-            # a barcode that plainly exists on the tin in their hand.
-            detail=(
-                "That barcode is not in Open Food Facts. Search for it by name "
-                "instead, or add it as your own food."
-            ),
-        ) from exc
-    except UnusableProduct as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            # Deliberately explicit. The alternative is storing the product with
-            # zeros, which would look like a working scan and put a wrong number
-            # in the diary.
-            detail=(
-                "That product is in the database but has no nutrition recorded, "
-                "so there is nothing to log. Search for it by name instead."
-            ),
-        ) from exc
-    except OffUnavailable as exc:
+    except (ProductNotFound, UnusableProduct, OffUnavailable) as exc:
+        if existing is not None:
+            return FoodRead.model_validate(existing)
+        if isinstance(exc, ProductNotFound):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    "That barcode is not in Open Food Facts. Search for it by name "
+                    "instead, or add it as your own food."
+                ),
+            ) from exc
+        if isinstance(exc, UnusableProduct):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "That product is in the database but has no nutrition recorded, "
+                    "so there is nothing to log. Search for it by name instead."
+                ),
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Could not reach the barcode database. Try again in a moment.",

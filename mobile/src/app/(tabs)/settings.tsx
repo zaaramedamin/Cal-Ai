@@ -508,45 +508,31 @@ const styles = StyleSheet.create({
     marginLeft: space.sm,
     marginBottom: -space.xs,
   },
-  languageCard: { gap: space.md, paddingVertical: space.lg },
+  languageCard: { gap: space.sm, paddingVertical: space.md },
   languageRow: {
     flexDirection: 'row',
-    // Wraps because the water-goal picker has five options, and five chips
-    // squeezed onto one line clip their own labels on a narrow phone.
-    flexWrap: 'wrap',
-    // `stretch`, so a chip whose label wraps to two lines does not leave the
-    // others short beside it. "Match my device" is twice the width of
-    // "English", and without this the row came out visibly ragged.
-    alignItems: 'stretch',
-    gap: space.sm,
+    alignItems: 'center',
+    gap: space.xs,
   },
   languageChip: {
-    // `flexGrow` rather than `flex: 1`: with wrapping, `flex: 1` forces every
-    // chip to an identical width and leaves a lone chip stretched across a
-    // whole row on its own.
-    flexGrow: 1,
-    // Wide enough for "Français" on one line at this size. Below about 88 the
-    // longer labels wrapped mid-word.
-    flexBasis: 88,
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    // A full tap target rather than 40. These are the controls most likely to
-    // be pressed by somebody who cannot read the current language.
-    minHeight: HIT_SLOP_MIN,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.sm,
+    minHeight: 40,
+    paddingVertical: space.xs + 2,
+    paddingHorizontal: 4,
     borderRadius: radius.pill,
     backgroundColor: color.wash,
   },
   languageChipOn: { backgroundColor: color.accent },
-  languageLabel: { ...text.label, fontSize: 13, textAlign: 'center' },
+  languageLabel: { ...text.label, fontSize: 12, lineHeight: 16, textAlign: 'center' },
   languageLabelOn: { color: color.onDark },
   languageNote: { ...text.bodyMuted, fontSize: 11, lineHeight: 15 },
 
   deleteCard: { gap: space.md, borderWidth: 1, borderColor: color.danger },
   deleteBody: { ...text.bodyMuted, fontSize: 13, lineHeight: 19 },
-  deleteActions: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  deleteCancel: { minHeight: HIT_SLOP_MIN, justifyContent: 'center', paddingHorizontal: space.sm },
+  deleteActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: space.sm },
+  deleteCancel: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.md },
   deleteError: {
     padding: space.md,
     borderRadius: radius.md,

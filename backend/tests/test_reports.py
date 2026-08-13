@@ -867,3 +867,31 @@ async def test_a_real_report_is_not_marked_as_machine_filed(
 
     assert rows[0]["reason"] == "wrong_numbers"
     assert rows[0]["system"] is False
+
+
+async def test_admin_direct_edit_and_republish_food(client: TestClient, session) -> None:
+    """An admin can directly edit food numbers and republish it."""
+    admin = await admin_account(client, session, "admin_editor@example.com")
+    headers = account(client, "author_food@example.com")
+
+    created = client.post(
+        "/api/v1/foods",
+        headers=headers,
+        json={"name": "Initial Food", "kcal": 100, "protein_g": 2, "carbs_g": 10, "fat_g": 5},
+    ).json()
+
+    food_id = created["id"]
+
+    res = client.post(
+        f"/api/v1/review/foods/{food_id}/edit",
+        headers=admin,
+        json={"name": "Corrected Food Name", "kcal": 150, "protein_g": 10, "republish": True},
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["name"] == "Corrected Food Name"
+    assert body["kcal"] == 150
+    assert body["protein_g"] == 10
+    assert body["withdrawn_reason"] is None
+

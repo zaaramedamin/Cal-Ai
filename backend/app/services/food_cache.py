@@ -261,16 +261,12 @@ async def upsert_food(session: AsyncSession, normalised: dict[str, Any]) -> Food
                     "data_fetched_at",
                 )
             },
-            # Never overwrite a curated catalogue row.
+            # Never overwrite a curated catalogue row or an approved/corrected food.
             #
-            # A catalogue food and a searched USDA food can be the same FDC id,
-            # and they deliberately share one row. Without this clause, one
-            # search for "egg" would replace the hand-written "Egg" / "Œuf" with
-            # USDA's "Egg, whole, raw, fresh" — silently, and for every user.
-            # The catalogue's numbers are refreshed explicitly by
-            # `seed-catalogue --force`, never as a side effect of somebody
-            # searching.
-            where=Food.kind != FoodKind.CATALOGUE,
+            # A catalogue food, a corrected food, or an approved custom food must
+            # maintain its hand-verified or admin-corrected figures, rather than
+            # being silently overwritten by an unrevised upstream fetch.
+            where=(Food.kind != FoodKind.CATALOGUE) & (Food.review_status != ReviewStatus.APPROVED),
         )
         .returning(Food.id)
     )

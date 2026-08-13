@@ -656,6 +656,10 @@ async def resolve_report(
                 value = getattr(payload, field)
                 if value is not None:
                     setattr(food, field, value)
+            food.withdrawn_at = None
+            food.withdrawn_reason = None
+            if food.owner_id is not None:
+                food.review_status = ReviewStatus.APPROVED
         else:
             food.withdrawn_at = datetime.now(UTC)
             food.withdrawn_reason = payload.note
@@ -833,3 +837,52 @@ async def inventory(
         portions_wanted=list(WANTED),
         foods=[f for f in foods if not f.has_photo] if missing_photo else foods,
     )
+
+
+class FoodEditInput(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    brand: str | None = Field(default=None, max_length=120)
+    kcal: float | None = Field(default=None, ge=0, le=900)
+    protein_g: float | None = Field(default=None, ge=0, le=100)
+    carbs_g: float | None = Field(default=None, ge=0, le=100)
+    fat_g: float | None = Field(default=None, ge=0, le=100)
+    republish: bool = Field(default=True, description="Restore to active search index")
+
+
+@router.post(
+    "/foods/{food_id}/edit",
+    response_model=FoodRead,
+    summary="Directly edit and republish a food entry as an admin",
+)
+async def edit_food(
+    food_id: uuid.UUID,
+    payload: FoodEditInput,
+    admin: AdminUser,
+    session: SessionDep,
+) -> FoodRead:
+    """Edit food numbers in place and republish it."""
+    food = await _load(session, food_id)
+    if food is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such food.")
+
+    if not food.is_correctable:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"This food's numbers come from {food.source}, which cannot be edited directly.",
+        )
+
+    for field in ("name", "brand", "kcal", "protein_g", "carbs_g", "fat_g"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(food, field, value)
+
+    if payload.republish:
+        food.withdrawn_at = None
+        food.withdrawn_reason = None
+        if food.owner_id is not None:
+            food.review_status = ReviewStatus.APPROVED
+
+    await session.commit()
+    logger.info("Food %s edited and republished by admin %s", food.id, admin.id)
+    return FoodRead.model_validate(await _load(session, food.id))
+

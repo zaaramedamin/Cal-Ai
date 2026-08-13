@@ -25,37 +25,48 @@
 import { Platform, type ViewStyle } from 'react-native';
 
 const palette = {
-  /** App canvas. Cool and very slightly blue, so white cards lift off it. */
-  canvas: '#F5F6FA',
-  /** Cards and sheets. */
+  /** App canvas. Cool, modern slate background. */
+  canvas: '#F8FAFC',
+  /** Cards and floating surfaces. Crisp pure white. */
   surface: '#FFFFFF',
-  /** Primary text. Near-black with a blue cast, to sit with the accent. */
-  ink: '#14161D',
+  /** Primary text. Deep obsidian navy. */
+  ink: '#0F172A',
 
-  /** The action colour. Buttons, focus rings, selection, the calorie ring. */
-  accent: '#4F46E5',
-  /** Pressed and active states. */
+  /** Modern Indigo/Violet Action Color. */
+  accent: '#6366F1',
+  /** Rich Gradient Accent End */
+  accentGradientEnd: '#4F46E5',
+  /** Pressed and active state. */
   accentDeep: '#4338CA',
 
-  /** Protein. Salmon-red. */
-  protein: '#F0544F',
-  /** Carbohydrate. Amber. */
-  carbs: '#F2A93B',
-  /** Fat. Blue. */
-  fat: '#4C86E8',
+  /** Protein. Rich Salmon/Coral Red. */
+  protein: '#EF4444',
+  proteinGradientEnd: '#F87171',
 
-  /** Streak flame and calorie accents. */
+  /** Carbohydrate. Vibrant Warm Amber. */
+  carbs: '#F59E0B',
+  carbsGradientEnd: '#FBBF24',
+
+  /** Fat. Electric Sky Blue. */
+  fat: '#3B82F6',
+  fatGradientEnd: '#60A5FA',
+
+  /** Water. Vivid Cyan/Teal. */
+  water: '#06B6D4',
+  waterGradientEnd: '#22D3EE',
+
+  /** Streak flame accent. */
   flame: '#F97316',
 
-  /** On track, goal met, weight trending the right way. */
-  positive: '#16A34A',
-  /** Over target, low confidence, "check this" — never an error. */
+  /** On track / Goal met green. */
+  positive: '#10B981',
+  /** Warning / Check this. */
   warning: '#F59E0B',
-  /** Errors and destructive actions. */
-  danger: '#DC2626',
+  /** Danger / Error. */
+  danger: '#EF4444',
 } as const;
 
-const INK_RGB = '20, 22, 29';
+const INK_RGB = '15, 23, 42';
 
 /** A translucent wash of a hue, for tinted surfaces on white. */
 const tint = (hex: string, alpha: number): string => {
@@ -69,11 +80,11 @@ export const color = {
   ...palette,
 
   /** Secondary text: timestamps, units, helper copy. */
-  inkMuted: `rgba(${INK_RGB}, 0.56)`,
+  inkMuted: `rgba(${INK_RGB}, 0.60)`,
   /** Tertiary text and disabled icons. */
-  inkFaint: `rgba(${INK_RGB}, 0.32)`,
+  inkFaint: `rgba(${INK_RGB}, 0.35)`,
   /** Hairline separators on white. */
-  hairline: `rgba(${INK_RGB}, 0.07)`,
+  hairline: `rgba(${INK_RGB}, 0.08)`,
   /** Neutral pressed/selected wash and empty ring tracks. */
   wash: `rgba(${INK_RGB}, 0.05)`,
 
@@ -81,21 +92,19 @@ export const color = {
   onDark: '#FFFFFF',
 
   // ---- Tinted surfaces --------------------------------------------------
-  // Backgrounds for cards, chips and badges that belong to a category. Light
-  // enough to carry black text at full contrast.
-  accentTint: tint(palette.accent, 0.1),
-  accentTintStrong: tint(palette.accent, 0.16),
+  // Backgrounds for cards, chips and badges that belong to a category.
+  accentTint: tint(palette.accent, 0.10),
+  accentTintStrong: tint(palette.accent, 0.18),
   proteinTint: tint(palette.protein, 0.11),
   carbsTint: tint(palette.carbs, 0.13),
   fatTint: tint(palette.fat, 0.11),
+  waterTint: tint(palette.water, 0.12),
   positiveTint: tint(palette.positive, 0.11),
   warningTint: tint(palette.warning, 0.13),
   dangerTint: tint(palette.danger, 0.09),
   flameTint: tint(palette.flame, 0.11),
 
   // Aliases kept so older screens keep compiling while they are restyled.
-  // They now resolve to the new palette rather than to black, so those screens
-  // pick up the accent without being touched.
   clay: palette.accent,
   clayDeep: palette.danger,
   inkWash: `rgba(${INK_RGB}, 0.05)`,
@@ -122,20 +131,12 @@ export const radius = {
 } as const;
 
 /**
- * Three elevations rather than one.
- *
- * A single shadow makes every surface equally important. Cards sit low, things
- * that float over content (the FAB, sheets, toasts) sit high, and the gap
- * between them is what tells you which layer you are looking at.
- *
- * Defined once because iOS and Android disagree about all of it — iOS wants
- * shadow*, Android wants elevation — and mixing them per-screen produces cards
- * that match on one platform only.
+ * Modern shadow elevations with soft colored ambient glows.
  */
-const shadow = (y: number, blur: number, opacity: number, elevation: number): ViewStyle =>
+const shadow = (y: number, blur: number, opacity: number, elevation: number, shadowColor = '#0F172A'): ViewStyle =>
   Platform.select({
     ios: {
-      shadowColor: '#0B1020',
+      shadowColor,
       shadowOffset: { width: 0, height: y },
       shadowOpacity: opacity,
       shadowRadius: blur,
@@ -145,36 +146,29 @@ const shadow = (y: number, blur: number, opacity: number, elevation: number): Vi
 
 export const elevation = {
   /** Cards resting on the canvas. */
-  low: shadow(3, 12, 0.05, 2),
+  low: shadow(4, 14, 0.04, 2),
   /** Raised cards, selected chips, sheets. */
-  mid: shadow(6, 18, 0.09, 6),
-  /** The FAB, toasts, anything above the content. */
+  mid: shadow(8, 22, 0.08, 6),
+  /** Floating navigation bar, modal sheets. */
+  glass: shadow(12, 32, 0.12, 10),
+  /** Floating action buttons and modals. */
   high: shadow(10, 26, 0.14, 12),
+  /** Glowing FAB action button. */
+  accentGlow: shadow(8, 20, 0.35, 10, palette.accent),
 } as const;
 
 /** Back-compat: the old single shadow token, now the low elevation. */
 export const cardShadow: ViewStyle = elevation.low;
 
-/**
- * Animation timings.
- *
- * Short by deliberate choice. An interface animation is feedback, not
- * entertainment: past roughly 300ms it stops reading as responsive and starts
- * reading as slow, and the user notices it on the fiftieth log of the week even
- * though it delighted them on the first.
- */
 export const duration = {
-  /** Press feedback, chip selection. */
   instant: 120,
-  /** Most transitions: fades, slides, colour changes. */
   quick: 220,
-  /** Rings and bars filling, numbers counting. */
   gentle: 600,
 } as const;
 
-/** Minimum touch target. Below this, taps start missing. */
 export const HIT_SLOP_MIN = 44;
 
 export type SpaceToken = keyof typeof space;
 export type RadiusToken = keyof typeof radius;
 export type ColorToken = keyof typeof color;
+

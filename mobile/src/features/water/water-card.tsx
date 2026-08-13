@@ -23,7 +23,7 @@ import { type WaterDay, logWater, undoWater } from '@/api/water';
 import { Card } from '@/components/card';
 import { useT } from '@/i18n';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
-import { text } from '@/theme/typography';
+import { fontFamily, text } from '@/theme/typography';
 
 /**
  * The three sizes offered.
@@ -101,7 +101,9 @@ export function WaterCard({ day, onChange }: { day: WaterDay; onChange: (day: Wa
     <Card style={styles.card}>
       <View style={styles.head}>
         <View style={styles.headLeft}>
-          <Ionicons name="water" size={18} color={color.accent} />
+          <View style={styles.iconCircle}>
+            <Ionicons name="water" size={16} color={color.water} />
+          </View>
           <Text style={text.label}>{t('water.title')}</Text>
         </View>
 
@@ -139,7 +141,7 @@ export function WaterCard({ day, onChange }: { day: WaterDay; onChange: (day: Wa
             accessibilityLabel={t('water.addLabel', { ml: option.ml })}
             style={({ pressed }) => [styles.add, pressed && styles.addPressed]}
           >
-            <Ionicons name={option.icon} size={18} color={color.accent} />
+            <Ionicons name={option.icon} size={18} color={color.water} />
             <Text style={styles.addText}>+{option.ml}</Text>
           </Pressable>
         ))}
@@ -149,43 +151,45 @@ export function WaterCard({ day, onChange }: { day: WaterDay; onChange: (day: Wa
 }
 
 const styles = StyleSheet.create({
-  // `space.xl` (24) on both, not `lg` (16) — `Card` already applies 16 all
-  // round, so setting paddingVertical to lg was a no-op that looked like a fix.
-  card: { gap: space.xl, paddingVertical: space.xl },
+  card: { gap: space.md + 2, paddingVertical: space.lg },
   head: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: space.xs,
   },
-  headLeft: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  undo: { ...text.bodyMuted, fontSize: 13, color: color.accent },
+  headLeft: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  iconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: color.waterTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  undo: { ...text.bodyMuted, fontSize: 13, color: color.water, fontFamily: fontFamily.semiBold },
 
   readout: {
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: space.sm,
-    // The number is the point of the card, so it gets air on both sides rather
-    // than sitting flush against the label above and the bar below.
-    paddingVertical: space.sm,
+    paddingVertical: space.xs,
   },
   total: {
     ...text.numeric,
-    fontSize: 40,
-    // Explicit, because a numeric face at 40px inherits a line box tight enough
-    // to clip descenders and to sit unevenly against the unit beside it.
-    lineHeight: 46,
+    fontSize: 38,
+    lineHeight: 44,
     color: color.ink,
+    fontFamily: fontFamily.extraBold,
   },
-  unit: { ...text.bodyMuted, fontSize: 14 },
+  unit: { ...text.bodyMuted, fontSize: 14, color: color.inkMuted },
 
   track: {
-    height: 6,
+    height: 8,
     borderRadius: radius.pill,
     backgroundColor: color.wash,
     overflow: 'hidden',
   },
-  fill: { height: '100%', borderRadius: radius.pill, backgroundColor: color.accent },
+  fill: { height: '100%', borderRadius: radius.pill, backgroundColor: color.water },
 
   adds: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
   add: {
@@ -194,11 +198,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.xs,
-    paddingVertical: space.lg,
+    paddingVertical: space.md,
     paddingHorizontal: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: color.accentTint,
+    borderRadius: radius.pill,
+    backgroundColor: color.waterTint,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  addPressed: { opacity: 0.7 },
-  addText: { ...text.label, fontSize: 13, color: color.accent },
+  addPressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
+  addText: { ...text.label, fontSize: 13, color: color.ink },
 });
