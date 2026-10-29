@@ -15,7 +15,7 @@ Both used to be accepted side by side, so the mobile app could move over a
 screen at a time. It has moved, and a fallback left in place meant `SECRET_KEY`
 could still mint a working token for any account, on a server whose sign-in no
 longer involves that key at all. The hand-built half is deleted once the tests
-stop relying on it; see TODO.md.
+stop relying on it.
 """
 
 import logging

@@ -332,5 +332,3 @@ deployed API and open the project in Expo Go.
 | Email | Supabase's built-in mailer is rate limited and intended for development. Configure custom SMTP, then enable email confirmation, before real users |
 | Languages | French and English. No Arabic interface |
 | Gaps | Typo-tolerant search, offline support, dark mode, a fully translated plan screen |
-
-The full list of remaining work is in [TODO.md](TODO.md).

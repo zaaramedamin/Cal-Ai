@@ -9,7 +9,7 @@ already holds. One POST was enough to lock a stranger out of the app.
 
 The routes survive only for a deployment with `SUPABASE_URL` unset, which is
 what the test suite runs as. Deleting them outright means moving ~25 test files
-onto Supabase-style tokens first — a separate change, noted in TODO.md.
+onto Supabase-style tokens first — a separate change.
 """
 
 import logging

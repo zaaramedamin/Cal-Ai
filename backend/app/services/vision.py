@@ -395,8 +395,7 @@ class VisionClient:
             "generationConfig": {
                 "response_mime_type": "application/json",
                 "response_schema": RESPONSE_SCHEMA,
-                # Deterministic-ish output suits an extraction task; Gemini
-                # still accepts temperature, unlike current Claude models.
+                # Deterministic-ish output suits an extraction task.
                 "temperature": 0.2,
                 "max_output_tokens": MAX_OUTPUT_TOKENS,
                 # Some thinking genuinely helps on a crowded plate, so it stays
