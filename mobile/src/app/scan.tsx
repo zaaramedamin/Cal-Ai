@@ -15,7 +15,7 @@
  */
 
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useState } from 'react';
@@ -32,18 +32,13 @@ import {
 
 import { ApiError } from '@/api/client';
 import { apiErrorMessage } from '@/api/errors';
-import {
-  type FoodSearchResult,
-
-  MEAL_SLOTS,
-  type MealSlot,
-  logFood,
-} from '@/api/diary';
+import { type FoodSearchResult, MEAL_SLOTS, type MealSlot, logFood, slotForNow } from '@/api/diary';
 import { type ScannedItem, describeMeal, isEstimate, scanMeal } from '@/api/scan';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { parseDecimal } from '@/lib/units';
 import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, cardShadow, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -84,6 +79,8 @@ type State =
       items: ReviewItem[];
       notes: string;
       estimatedCount: number;
+      /** Set when logging stopped partway; the review stays so it can be retried. */
+      logError?: string;
     }
   | { kind: 'nothing'; preview?: string; notes: string }
   | { kind: 'error'; title: string; message: string };
@@ -101,18 +98,13 @@ function toReviewItems(items: ScannedItem[]): ReviewItem[] {
   }));
 }
 
-/** Which meal to log into, by hour. Overridable with the chips on the review step. */
-function slotForNow(): MealSlot {
-  const hour = new Date().getHours();
-  if (hour < 11) return 'breakfast';
-  if (hour < 15) return 'lunch';
-  if (hour < 18) return 'snack';
-  return 'dinner';
-}
-
 export default function ScanScreen() {
   const router = useRouter();
   const t = useT();
+  // The day the diary was showing when + was tapped. The tab bar has always
+  // passed it; this screen never read it, so a meal scanned while looking at
+  // Tuesday was filed under today.
+  const { day } = useLocalSearchParams<{ day?: string }>();
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [slot, setSlot] = useState<MealSlot>(slotForNow);
   const [logging, setLogging] = useState(false);
@@ -228,6 +220,8 @@ export default function ScanScreen() {
             items: current.items.map((item) =>
               item.key === key ? { ...item, ...patch } : item,
             ),
+            // Any edit is a fresh attempt; the old failure no longer describes it.
+            logError: undefined,
           }
         : current,
     );
@@ -239,6 +233,7 @@ export default function ScanScreen() {
     if (chosen.length === 0) return;
 
     setLogging(true);
+    const logged = new Set<string>();
     try {
       // Sequential, so a partial failure leaves a known state: everything before
       // the failure is logged and the error names what stopped. Firing them all
@@ -249,17 +244,26 @@ export default function ScanScreen() {
           foodId: item.match!.id,
           mealSlot: slot,
           quantityGrams: gramsOf(item),
+          localDate: day || undefined,
         });
+        logged.add(item.key);
       }
       router.dismissAll();
       router.replace(HOME);
     } catch (caught) {
-      setState({
-        kind: 'error',
-        title: t('scan.logPartial'),
-        message:
-          apiErrorMessage(t, caught, 'scan.logPartialBody'),
-      });
+      // Stay on the review with what is still unlogged. Replacing it with an
+      // error screen threw the scan away, and "Try again" from there meant
+      // photographing the plate again and logging the first items twice.
+      const message = apiErrorMessage(t, caught, 'scan.logPartialBody');
+      setState((current) =>
+        current.kind === 'review'
+          ? {
+              ...current,
+              items: current.items.filter((item) => !logged.has(item.key)),
+              logError: `${t('scan.logPartial')}. ${message}`,
+            }
+          : current,
+      );
     } finally {
       setLogging(false);
     }
@@ -316,6 +320,7 @@ export default function ScanScreen() {
       {state.kind === 'review' && (
         <Review
           state={state}
+          day={day}
           slot={slot}
           onSlot={setSlot}
           onUpdate={updateItem}
@@ -457,6 +462,7 @@ function Outcome({
 
 function Review({
   state,
+  day,
   slot,
   onSlot,
   onUpdate,
@@ -465,6 +471,7 @@ function Review({
   logging,
 }: {
   state: Extract<State, { kind: 'review' }>;
+  day?: string;
   slot: MealSlot;
   onSlot: (slot: MealSlot) => void;
   onUpdate: (key: string, patch: Partial<ReviewItem>) => void;
@@ -486,17 +493,32 @@ function Review({
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.reviewScroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.reviewScroll}
+        showsVerticalScrollIndicator={false}
+        // The grams fields are in this list. Without these the keyboard covered
+        // the lower ones, and the first tap on Log only dismissed it.
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
         <View style={styles.reviewHead}>
           {state.preview && (
             <Image source={{ uri: state.preview }} style={styles.previewThumb} />
           )}
           <View style={styles.reviewHeadText}>
             <Text style={text.heading}>
-              {state.items.length} item{state.items.length === 1 ? '' : 's'} found
+              {state.items.length === 1
+                ? t('scan.itemsFoundOne')
+                : t('scan.itemsFoundMany', { count: state.items.length })}
             </Text>
-            <Pressable onPress={onRetake} accessibilityRole="button" hitSlop={8}>
-              <Text style={styles.retake}>Retake</Text>
+            <Pressable
+              onPress={onRetake}
+              accessibilityRole="button"
+              hitSlop={8}
+              style={styles.retakeButton}
+            >
+              <Ionicons name="refresh" size={14} color={color.accent} />
+              <Text style={styles.retake}>{t('scan.retake')}</Text>
             </Pressable>
           </View>
         </View>
@@ -506,29 +528,27 @@ function Review({
             know exactly which part of it is a guess. */}
         <View style={styles.honesty}>
           <Ionicons name="information-circle-outline" size={16} color={color.inkMuted} />
-          <Text style={styles.honestyText}>
-            Portions are AI estimates — check them before logging. Nutrition comes from USDA.
-          </Text>
+          <Text style={styles.honestyText}>{t('scan.honesty')}</Text>
         </View>
 
         {state.estimatedCount > 0 && (
           // A second, stronger warning, because these items break the promise
-          // the line above makes. Saying "nutrition comes from USDA" and then
-          // silently including numbers that do not would be the dishonest way
-          // to ship this feature.
+          // the line above makes. Saying "the numbers come from the database"
+          // and then silently including numbers that do not would be the
+          // dishonest way to ship this feature.
           <View style={styles.estimateNotice}>
-            <Ionicons name="sparkles-outline" size={16} color={color.carbs} />
+            <Ionicons name="sparkles-outline" size={16} color={color.warningText} />
             <Text style={styles.estimateNoticeText}>
-              {state.estimatedCount === 1 ? '1 food is' : `${state.estimatedCount} foods are`} not
-              in the USDA database, so the numbers below are the AI&apos;s own estimate. Treat
-              them as approximate.
+              {state.estimatedCount === 1
+                ? t('scan.estimateOne')
+                : t('scan.estimateMany', { count: state.estimatedCount })}
             </Text>
           </View>
         )}
 
         {state.notes.length > 0 && <Text style={styles.notes}>{state.notes}</Text>}
 
-        <Text style={[text.overline, styles.sectionLabel]}>Meal</Text>
+        <Text style={[text.overline, styles.sectionLabel]}>{t('food.mealSection')}</Text>
         <View style={styles.slotRow}>
           {MEAL_SLOTS.map((option) => {
             const selected = option === slot;
@@ -558,7 +578,8 @@ function Review({
             onSearch={() =>
               router.push({
                 pathname: '/search',
-                params: { slot, q: item.detectedName },
+                // `day` too, or a food found this way was logged to today.
+                params: { slot, q: item.detectedName, day: day ?? '' },
               })
             }
           />
@@ -566,15 +587,24 @@ function Review({
 
         {unmatched > 0 && (
           <Text style={styles.unmatchedNote}>
-            {unmatched} item{unmatched === 1 ? '' : 's'} had no match in the food database.
-            Rather than invent numbers for {unmatched === 1 ? 'it' : 'them'}, Cal Ai leaves{' '}
-            {unmatched === 1 ? 'it' : 'them'} out — search manually to add{' '}
-            {unmatched === 1 ? 'it' : 'them'}.
+            {unmatched === 1
+              ? t('scan.unmatchedOne')
+              : t('scan.unmatchedMany', { count: unmatched })}
           </Text>
         )}
       </ScrollView>
 
-      {/* Pinned, so the total and the action stay visible while editing grams. */}
+      {state.logError && (
+        <View style={styles.logError} accessibilityRole="alert">
+          <Text style={styles.logErrorText}>{state.logError}</Text>
+        </View>
+      )}
+
+      {/* Pinned, so the total and the action stay visible while editing grams.
+          In the normal flow under the ScrollView rather than absolutely
+          positioned: an absolute child ignores the screen's padding, so the
+          footer ran edge to edge — the total touching the screen's left edge —
+          and sat in the home-indicator area instead of above it. */}
       <View style={styles.footer}>
         <View>
           <Text style={styles.footerTotal}>{Math.round(totalKcal).toLocaleString()} kcal</Text>
@@ -655,13 +685,13 @@ function ReviewCard({
             // than only summarised at the top. A user scrolling a list of five
             // foods should not have to remember which of them were guessed.
             <View style={styles.estimateBadge}>
-              <Ionicons name="sparkles-outline" size={12} color={color.carbs} />
-              <Text style={styles.estimateBadgeText}>AI estimate — not from USDA</Text>
+              <Ionicons name="sparkles-outline" size={12} color={color.warningText} />
+              <Text style={styles.estimateBadgeText}>{t('scan.estimateBadge')}</Text>
             </View>
           )}
           {item.confidence < LOW_CONFIDENCE && (
             <View style={styles.lowConfidence}>
-              <Ionicons name="alert-circle-outline" size={13} color={color.carbs} />
+              <Ionicons name="alert-circle-outline" size={13} color={color.warningText} />
               <Text style={styles.lowConfidenceText}>{t('scan.lowConfidence')}</Text>
             </View>
           )}
@@ -700,8 +730,8 @@ function ReviewCard({
 /* -------------------------------------------------------------------------- */
 
 function gramsOf(item: ReviewItem): number {
-  const value = Number(item.grams);
-  return Number.isFinite(value) ? value : 0;
+  // parseDecimal, not Number: "85,5" from a French keypad is a real amount.
+  return parseDecimal(item.grams) ?? 0;
 }
 
 /**
@@ -766,7 +796,7 @@ const styles = StyleSheet.create({
     marginBottom: space.md,
   },
   cancel: { minHeight: HIT_SLOP_MIN, justifyContent: 'center', paddingLeft: space.md },
-  cancelLabel: { ...text.label, color: color.clay },
+  cancelLabel: { ...text.label, color: color.accent },
 
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: space.sm },
   waitingCaption: { marginTop: space.xs },
@@ -791,7 +821,7 @@ const styles = StyleSheet.create({
   sourceTitle: { ...text.label, fontSize: 16 },
   sourceHint: { ...text.bodyMuted, fontSize: 12 },
   sourceTitleOnDark: { ...text.label, fontSize: 16, color: color.onDark },
-  sourceHintOnDark: { ...text.bodyMuted, fontSize: 12, color: 'rgba(255, 255, 255, 0.65)' },
+  sourceHintOnDark: { ...text.bodyMuted, fontSize: 12, color: color.onDarkMuted },
   pressed: { opacity: 0.85 },
 
   describeBlock: { marginTop: space.lg, gap: space.sm },
@@ -832,17 +862,24 @@ const styles = StyleSheet.create({
     backgroundColor: color.wash,
   },
 
-  reviewScroll: { paddingBottom: 120, gap: space.md },
+  reviewScroll: { paddingBottom: space.lg, gap: space.md },
   reviewHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   reviewHeadText: { flex: 1, gap: 2 },
-  retake: { ...text.label, fontSize: 13, color: color.inkMuted },
+  retakeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    minHeight: 28,
+  },
+  retake: { ...text.label, fontSize: 13, color: color.accent },
 
   honesty: {
     flexDirection: 'row',
     gap: space.sm,
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: color.inkWash,
+    backgroundColor: color.wash,
   },
   honestyText: { ...text.bodyMuted, fontSize: 12, flex: 1, lineHeight: 17 },
   notes: { ...text.bodyMuted, fontSize: 12, fontStyle: 'italic' },
@@ -852,13 +889,13 @@ const styles = StyleSheet.create({
     gap: space.sm,
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(239, 160, 54, 0.10)',
+    backgroundColor: color.warningTint,
     borderLeftWidth: 3,
-    borderLeftColor: color.carbs,
+    borderLeftColor: color.warning,
   },
   estimateNoticeText: { ...text.body, fontSize: 12, flex: 1, lineHeight: 17 },
   estimateBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
-  estimateBadgeText: { ...text.label, fontSize: 11, color: color.carbs },
+  estimateBadgeText: { ...text.label, fontSize: 11, color: color.warningText },
 
   sectionLabel: { marginTop: space.sm },
   slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
@@ -876,9 +913,9 @@ const styles = StyleSheet.create({
   slotChipLabelSelected: { color: color.onDark },
 
   itemCard: { gap: space.md },
-  // A left edge in the carbs amber, matching the badge and the banner, so an
+  // A left edge in the warning amber, matching the badge and the banner, so an
   // estimated row is identifiable at a glance while scrolling.
-  itemCardEstimated: { borderLeftWidth: 3, borderLeftColor: color.carbs },
+  itemCardEstimated: { borderLeftWidth: 3, borderLeftColor: color.warning },
   itemTop: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md },
   checkbox: {
     width: 24,
@@ -894,7 +931,7 @@ const styles = StyleSheet.create({
   checkboxDisabled: { opacity: 0.35 },
   itemText: { flex: 1, gap: 3 },
   itemMatch: { ...text.bodyMuted, fontSize: 12 },
-  itemNoMatch: { ...text.bodyMuted, fontSize: 12, color: color.danger },
+  itemNoMatch: { ...text.bodyMuted, fontSize: 12, color: color.dangerText },
   lowConfidence: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   lowConfidenceText: { ...text.bodyMuted, fontSize: 11 },
   itemKcalBlock: { alignItems: 'flex-end' },
@@ -910,18 +947,22 @@ const styles = StyleSheet.create({
 
   unmatchedNote: { ...text.bodyMuted, fontSize: 12, lineHeight: 17 },
 
+  logError: {
+    marginBottom: space.sm,
+    padding: space.md,
+    borderRadius: radius.md,
+    backgroundColor: color.dangerTint,
+    borderLeftWidth: 3,
+    borderLeftColor: color.danger,
+  },
+  logErrorText: { ...text.body, fontSize: 13, lineHeight: 18 },
+
   footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space.lg,
     paddingTop: space.md,
-    paddingBottom: space.lg,
-    backgroundColor: color.canvas,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: color.hairline,
   },

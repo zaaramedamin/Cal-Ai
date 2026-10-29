@@ -16,27 +16,37 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { ApiError } from '@/api/client';
 import { apiErrorMessage } from '@/api/errors';
 import {
   type DaySummary,
   type DiaryEntry,
-  type MealSlot,
   type QuickAddFood,
   deleteEntry,
   getDay,
   getQuickAdd,
   localDateString,
   logFood,
+  slotForNow,
 } from '@/api/diary';
 import { type ProfileWithTargets, getProfile } from '@/api/profile';
 import { type WaterDay, getWaterDay } from '@/api/water';
 import { getProgress } from '@/api/progress';
 import { type Suggestion, getSuggestions } from '@/api/suggestions';
 import { BodyCard } from '@/components/body-avatar';
+import { Button } from '@/components/button';
 import { Card } from '@/components/card';
 import { CountUp, EnterUp, GrowBar, PressableScale } from '@/components/motion';
 import { ProgressRing } from '@/components/progress-ring';
@@ -55,15 +65,6 @@ type State =
   | { kind: 'loading' }
   | { kind: 'ready'; summary: DaySummary }
   | { kind: 'error'; message: string };
-
-/** Which meal the + button assumes, by hour. Overridable on the food screen. */
-function slotForNow(): MealSlot {
-  const hour = new Date().getHours();
-  if (hour < 11) return 'breakfast';
-  if (hour < 15) return 'lunch';
-  if (hour < 18) return 'snack';
-  return 'dinner';
-}
 
 function greeting(t: Translate): string {
   const hour = new Date().getHours();
@@ -96,82 +97,111 @@ export default function HomeScreen() {
     setState({ kind: 'ready', summary: await getDay(day) });
   }, [day]);
 
+  /**
+   * Everything the screen shows, fetched in parallel.
+   *
+   * One function, so focusing the tab, pulling to refresh and the error card's
+   * retry all load exactly the same things. The error card used to have no
+   * retry at all: a failed load stayed failed until you left the tab and came
+   * back, which nobody would guess.
+   *
+   * `isCancelled` rather than an AbortSignal: the requests are cheap to let
+   * finish, and what matters is only that a stale one does not overwrite state.
+   */
+  const loadAll = useCallback(
+    (isCancelled: () => boolean) =>
+      Promise.all([
+        (async () => {
+          try {
+            const summary = await getDay(day);
+            if (!isCancelled()) setState({ kind: 'ready', summary });
+          } catch (caught) {
+            if (isCancelled()) return;
+            if (caught instanceof ApiError && caught.status === 404) {
+              router.replace('/onboarding');
+              return;
+            }
+            setState({ kind: 'error', message: apiErrorMessage(t, caught, 'home.loadFailed') });
+          }
+        })(),
+
+        // Everything below is decoration in the strict sense: the screen is
+        // complete without it, so no failure here may block the day loading.
+        (async () => {
+          try {
+            const progress = await getProgress();
+            if (!isCancelled()) setStreak(progress.streak_days);
+          } catch {
+            /* the flame simply doesn't render */
+          }
+        })(),
+
+        (async () => {
+          try {
+            const foods = await getQuickAdd();
+            if (!isCancelled()) setQuickAdd(foods);
+          } catch {
+            /* the chips simply don't render */
+          }
+        })(),
+
+        (async () => {
+          try {
+            const profile = await getProfile();
+            if (!isCancelled()) setBody(profile);
+          } catch {
+            /* the figure simply doesn't render */
+          }
+        })(),
+
+        (async () => {
+          try {
+            const today = await getWaterDay(day);
+            if (!isCancelled()) setWater(today);
+          } catch {
+            /* the card simply doesn't render */
+          }
+        })(),
+
+        (async () => {
+          try {
+            const response = await getSuggestions();
+            if (isCancelled()) return;
+            setSuggestions(response.suggestions);
+            setSuggestionNote(response.note);
+          } catch {
+            /* the card simply doesn't render */
+          }
+        })(),
+      ]),
+    [day, router, t],
+  );
+
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-
-      (async () => {
-        try {
-          const summary = await getDay(day);
-          if (!cancelled) setState({ kind: 'ready', summary });
-        } catch (caught) {
-          if (cancelled) return;
-          if (caught instanceof ApiError && caught.status === 404) {
-            router.replace('/onboarding');
-            return;
-          }
-          setState({
-            kind: 'error',
-            message:
-              apiErrorMessage(t, caught, 'home.loadFailed'),
-          });
-        }
-      })();
-
-      // Streak and quick-add are both decoration in the strict sense: the screen
-      // is complete without them, so neither failure may block the day loading.
-      (async () => {
-        try {
-          const progress = await getProgress();
-          if (!cancelled) setStreak(progress.streak_days);
-        } catch {
-          /* the flame simply doesn't render */
-        }
-      })();
-
-      (async () => {
-        try {
-          const foods = await getQuickAdd();
-          if (!cancelled) setQuickAdd(foods);
-        } catch {
-          /* the chips simply don't render */
-        }
-      })();
-
-      (async () => {
-        try {
-          const profile = await getProfile();
-          if (!cancelled) setBody(profile);
-        } catch {
-          /* the figure simply doesn't render */
-        }
-      })();
-
-      (async () => {
-        try {
-          const today = await getWaterDay(day);
-          if (!cancelled) setWater(today);
-        } catch {
-          /* like the streak and the figure: decoration, never blocks the day */
-        }
-      })();
-
-      (async () => {
-        try {
-          const response = await getSuggestions();
-          if (cancelled) return;
-          setSuggestions(response.suggestions);
-          setSuggestionNote(response.note);
-        } catch {
-          /* the card simply doesn't render */
-        }
-      })();
-
+      void loadAll(() => cancelled);
       return () => {
         cancelled = true;
       };
-    }, [day, router]),
+    }, [loadAll]),
   );
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      await loadAll(() => false);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  function retry() {
+    setState({ kind: 'loading' });
+    void loadAll(() => false);
+  }
 
   async function handleQuickAdd(food: QuickAddFood) {
     setAddingId(food.id);
@@ -238,7 +268,8 @@ export default function HomeScreen() {
 
       {state.kind === 'loading' && (
         <View style={styles.centered}>
-          <Text style={text.bodyMuted}>Loading…</Text>
+          <ActivityIndicator color={color.accent} />
+          <Text style={[text.bodyMuted, styles.loadingLabel]}>{t('common.loading')}</Text>
         </View>
       )}
 
@@ -246,11 +277,16 @@ export default function HomeScreen() {
         <Card style={styles.errorCard}>
           <Text style={text.label}>{t('home.cantLoadDay')}</Text>
           <Text style={[text.bodyMuted, styles.errorBody]}>{state.message}</Text>
+          <View style={styles.errorAction}>
+            <Button label={t('common.retry')} variant="secondary" onPress={retry} />
+          </View>
         </Card>
       )}
 
       {state.kind === 'ready' && (
         <Dashboard
+          refreshing={refreshing}
+          onRefresh={() => void refresh()}
           summary={state.summary}
           body={body}
           water={water}
@@ -268,36 +304,9 @@ export default function HomeScreen() {
   );
 }
 
-/** One row of the + menu: a readable label beside a round icon button. */
-function FabAction({
-  icon,
-  label,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <PressableScale
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={styles.menuRow}
-    >
-      {/* The label is a tap target too, not just a caption — a bare icon here
-          would make the user guess which circle is which. */}
-      <View style={styles.menuLabelPill}>
-        <Text style={styles.menuLabel}>{label}</Text>
-      </View>
-      <View style={styles.menuIcon}>
-        <Ionicons name={icon} size={22} color={color.onDark} />
-      </View>
-    </PressableScale>
-  );
-}
-
 function Dashboard({
+  refreshing,
+  onRefresh,
   summary,
   body,
   water,
@@ -309,6 +318,8 @@ function Dashboard({
   onQuickAdd,
   onDelete,
 }: {
+  refreshing: boolean;
+  onRefresh: () => void;
   summary: DaySummary;
   /** Null while the profile is loading, or if it failed — the figure is
       decoration in the strict sense and must never block the day. */
@@ -334,7 +345,20 @@ function Dashboard({
     .sort((a, b) => b.logged_at.localeCompare(a.logged_at));
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={styles.scroll}
+      showsVerticalScrollIndicator={false}
+      // Pull to refresh: the gesture everybody tries first when a number looks
+      // stale — after logging on another device, say.
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={color.accent}
+          colors={[color.accent]}
+        />
+      }
+    >
       <EnterUp index={0}>
         <Card style={styles.calorieCard}>
           <View style={styles.calorieText}>
@@ -369,6 +393,7 @@ function Dashboard({
             eaten={summary.totals.protein_g}
             target={summary.target_macros.protein_g}
             tint={color.protein}
+            ink={color.proteinText}
             surface={color.proteinTint}
             icon="lightning-bolt"
           />
@@ -377,6 +402,7 @@ function Dashboard({
             eaten={summary.totals.carbs_g}
             target={summary.target_macros.carbs_g}
             tint={color.carbs}
+            ink={color.carbsText}
             surface={color.carbsTint}
             icon="barley"
           />
@@ -385,6 +411,7 @@ function Dashboard({
             eaten={summary.totals.fat_g}
             target={summary.target_macros.fat_g}
             tint={color.fat}
+            ink={color.fatText}
             surface={color.fatTint}
             icon="water"
           />
@@ -411,7 +438,7 @@ function Dashboard({
       )}
 
       {quickAdd.length > 0 && (
-        <EnterUp index={3}>
+        <EnterUp index={4}>
           <View style={styles.quickAddBlock}>
             <Text style={styles.sectionTitle}>{t('home.yourUsuals')}</Text>
             <ScrollView
@@ -433,7 +460,7 @@ function Dashboard({
       )}
 
       {(suggestions.length > 0 || suggestionNote) && (
-        <EnterUp index={3}>
+        <EnterUp index={5}>
           <Card style={styles.suggestCard}>
             <View style={styles.suggestHead}>
               <View style={styles.suggestIcon}>
@@ -455,9 +482,10 @@ function Dashboard({
                     })
                   }
                   accessibilityRole="button"
-                  accessibilityLabel={`${suggestion.food.name}, ${Math.round(
-                    suggestion.grams,
-                  )} grams`}
+                  accessibilityLabel={t('a11y.suggestion', {
+                    name: suggestion.food.name,
+                    grams: Math.round(suggestion.grams),
+                  })}
                   style={styles.suggestRow}
                   scaleTo={0.985}
                 >
@@ -485,7 +513,7 @@ function Dashboard({
       <Text style={styles.sectionTitle}>{t('home.loggedToday')}</Text>
 
       {entries.length === 0 ? (
-        <EnterUp index={4}>
+        <EnterUp index={6}>
           <Card style={styles.emptyCard}>
             {/* Renders only when the photo exists; the card is designed to look
                 complete without it, so a fresh clone is never half-drawn. */}
@@ -502,7 +530,7 @@ function Dashboard({
         </EnterUp>
       ) : (
         entries.map((entry, index) => (
-          <EnterUp key={entry.id} index={4 + index}>
+          <EnterUp key={entry.id} index={6 + index}>
             <PressableScale
               onLongPress={() => onDelete(entry)}
               accessibilityRole="button"
@@ -517,7 +545,9 @@ function Dashboard({
                   <Text style={styles.entryMeta}>
                     {t(`slot.${entry.meal_slot}`)} ·{' '}
                     {entry.servings
-                      ? `${entry.servings} serving${entry.servings === 1 ? '' : 's'}`
+                      ? entry.servings === 1
+                        ? t('home.servingOne')
+                        : t('home.servingMany', { count: entry.servings })
                       : `${Math.round(entry.quantity_grams)} g`}
                   </Text>
                   <View style={styles.chipRow}>
@@ -537,9 +567,7 @@ function Dashboard({
       )}
 
       {summary.totals.partial.length > 0 && (
-        <Text style={styles.partialNote}>
-          Some foods didn&apos;t report every nutrient, so some totals are minimums.
-        </Text>
+        <Text style={styles.partialNote}>{t('home.partialNote')}</Text>
       )}
     </ScrollView>
   );
@@ -554,6 +582,7 @@ function QuickAddChip({
   busy: boolean;
   onPress: () => void;
 }) {
+  const t = useT();
   const kcal = Math.round((food.kcal * food.last_quantity_grams) / 100);
 
   return (
@@ -561,7 +590,10 @@ function QuickAddChip({
       onPress={onPress}
       disabled={busy}
       accessibilityRole="button"
-      accessibilityLabel={`Log ${Math.round(food.last_quantity_grams)} grams of ${food.name}`}
+      accessibilityLabel={t('a11y.quickAdd', {
+        grams: Math.round(food.last_quantity_grams),
+        name: food.name,
+      })}
       style={[styles.chip, busy && styles.chipBusy]}
     >
       <View style={styles.chipPlus}>
@@ -586,16 +618,21 @@ function MacroTile({
   eaten,
   target,
   tint,
+  ink,
   surface,
   icon,
 }: {
   label: string;
   eaten: number;
   target: number;
+  /** The hue, for the bar and the icon. */
   tint: string;
+  /** The same hue deep enough to read as text on `surface`. */
+  ink: string;
   surface: string;
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
 }) {
+  const t = useT();
   const left = Math.round(target - eaten);
   const over = left < 0;
   const fraction = target > 0 ? eaten / target : 0;
@@ -606,14 +643,18 @@ function MacroTile({
     // actually used — glanced at, not studied.
     <View style={[styles.macroTile, { backgroundColor: surface }]}>
       <View style={styles.macroHead}>
-        <MaterialCommunityIcons name={icon} size={15} color={tint} />
-        <Text style={styles.macroLabel}>{label}</Text>
+        <MaterialCommunityIcons name={icon} size={15} color={ink} />
+        <Text style={styles.macroLabel} numberOfLines={1}>
+          {label}
+        </Text>
       </View>
-      <Text style={[styles.macroValue, { color: tint }]}>
+      {/* `ink`, not `tint`: amber on its own amber wash was 1.9:1, so the carbs
+          number — the one people check most — was the hardest to read. */}
+      <Text style={[styles.macroValue, { color: ink }]}>
         {Math.abs(left)}
         <Text style={styles.macroUnit}>g</Text>
       </Text>
-      <Text style={styles.macroCaption}>{over ? 'over' : 'left'}</Text>
+      <Text style={styles.macroCaption}>{over ? t('home.macroOver') : t('home.macroLeft')}</Text>
       <View style={styles.macroTrack}>
         <GrowBar fraction={fraction} tint={tint} height={5} />
       </View>
@@ -647,12 +688,14 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
     borderRadius: radius.pill,
   },
-  streakCount: { ...text.numeric, fontSize: 15, color: color.flame },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  streakCount: { ...text.numeric, fontSize: 15, color: color.flameText },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm },
+  loadingLabel: { textAlign: 'center' },
   // Clears the floating tab bar, which overlays the content.
   scroll: { paddingTop: space.lg, paddingBottom: TAB_DOCK_HEIGHT + space.xl, gap: space.md },
   errorCard: { marginTop: space.lg },
   errorBody: { marginTop: space.xs },
+  errorAction: { marginTop: space.lg },
 
   calorieCard: {
     flexDirection: 'row',
@@ -678,7 +721,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
   },
   macroHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  macroLabel: { ...text.overline, fontSize: 10, color: color.inkMuted },
+  macroLabel: { ...text.overline, fontSize: 11, color: color.inkMuted, flexShrink: 1 },
   macroValue: { fontFamily: fontFamily.extraBold, fontSize: 22, letterSpacing: -0.5 },
   macroUnit: { fontFamily: fontFamily.bold, fontSize: 13 },
   macroCaption: { ...text.bodyMuted, fontSize: 11 },
@@ -771,47 +814,4 @@ const styles = StyleSheet.create({
   },
   emptyBody: { marginTop: space.xs, fontSize: 13, textAlign: 'center' },
   partialNote: { ...text.bodyMuted, fontSize: 12, marginTop: space.sm },
-
-  scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(20, 22, 29, 0.20)',
-  },
-  menu: {
-    position: 'absolute',
-    right: space.xl,
-    bottom: space.xl + 62 + space.md,
-    alignItems: 'flex-end',
-    gap: space.md,
-  },
-  menuRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  menuLabelPill: {
-    backgroundColor: color.surface,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.sm,
-    borderRadius: radius.pill,
-    ...elevation.mid,
-  },
-  menuLabel: { ...text.label, fontSize: 14 },
-  menuIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: radius.pill,
-    backgroundColor: color.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...elevation.mid,
-  },
-
-  fab: {
-    position: 'absolute',
-    right: space.xl,
-    bottom: space.xl,
-    width: 62,
-    height: 62,
-    borderRadius: radius.pill,
-    backgroundColor: color.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...elevation.high,
-  },
 });

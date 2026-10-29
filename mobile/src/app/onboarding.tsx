@@ -306,8 +306,8 @@ export default function OnboardingScreen() {
                 <Text style={styles.measureLabel}>{t('body.height')}</Text>
                 <UnitToggle
                   options={[
-                    { value: 'ftin', label: 'ft/in' },
                     { value: 'cm', label: 'cm' },
+                    { value: 'ftin', label: 'ft/in' },
                   ]}
                   value={heightUnit}
                   onChange={setHeightUnit}
@@ -316,6 +316,7 @@ export default function OnboardingScreen() {
               {heightUnit === 'cm' ? (
                 <RulerPicker
                   {...HEIGHT_RANGE.cm}
+                  accessibilityLabel={t('body.height')}
                   value={Math.round(heightCm)}
                   onChange={setHeightCm}
                   unit="cm"
@@ -323,6 +324,7 @@ export default function OnboardingScreen() {
               ) : (
                 <RulerPicker
                   {...HEIGHT_RANGE.ftin}
+                  accessibilityLabel={t('body.height')}
                   value={Math.round(cmToInches(heightCm))}
                   onChange={(inches) => setHeightCm(inchesToCm(inches))}
                   formatValue={formatFeetInches}
@@ -335,8 +337,8 @@ export default function OnboardingScreen() {
                 <Text style={styles.measureLabel}>{t('body.weight')}</Text>
                 <UnitToggle
                   options={[
-                    { value: 'lbs', label: 'lbs' },
                     { value: 'kg', label: 'kg' },
+                    { value: 'lbs', label: 'lbs' },
                   ]}
                   value={weightUnit}
                   onChange={setWeightUnit}
@@ -345,6 +347,7 @@ export default function OnboardingScreen() {
               {weightUnit === 'kg' ? (
                 <RulerPicker
                   {...WEIGHT_RANGE.kg}
+                  accessibilityLabel={t('body.weight')}
                   value={Math.round(weightKg)}
                   onChange={(kg) => {
                     setWeightKg(kg);
@@ -355,6 +358,7 @@ export default function OnboardingScreen() {
               ) : (
                 <RulerPicker
                   {...WEIGHT_RANGE.lbs}
+                  accessibilityLabel={t('body.weight')}
                   value={Math.round(kgToLbs(weightKg))}
                   onChange={(lbs) => setWeightKg(lbsToKg(lbs))}
                   unit="lbs"
@@ -426,6 +430,7 @@ export default function OnboardingScreen() {
             {weightUnit === 'kg' ? (
               <RulerPicker
                 {...WEIGHT_RANGE.kg}
+                accessibilityLabel={t('onboarding.targetTitle')}
                 value={Math.round(targetKg)}
                 onChange={setTargetKg}
                 unit="kg"
@@ -434,6 +439,7 @@ export default function OnboardingScreen() {
             ) : (
               <RulerPicker
                 {...WEIGHT_RANGE.lbs}
+                accessibilityLabel={t('onboarding.targetTitle')}
                 value={Math.round(kgToLbs(targetKg))}
                 onChange={(lbs) => setTargetKg(lbsToKg(lbs))}
                 unit="lbs"
@@ -605,7 +611,7 @@ const styles = StyleSheet.create({
     marginTop: space.lg,
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: color.inkWash,
+    backgroundColor: color.dangerTint,
     borderLeftWidth: 3,
     borderLeftColor: color.danger,
   },

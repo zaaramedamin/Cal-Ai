@@ -10,7 +10,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { addDays, localDateString } from '@/api/diary';
-import { useT } from '@/i18n';
+import { useLanguage } from '@/i18n';
 import { WEEKDAY_KEYS } from '@/i18n/strings';
 import { color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily } from '@/theme/typography';
@@ -22,7 +22,7 @@ interface WeekStripProps {
 }
 
 export function WeekStrip({ selected, onSelect }: WeekStripProps) {
-  const t = useT();
+  const { t, language } = useLanguage();
   const today = localDateString();
   // The strip always ends at today: six days back through now. A calendar that
   // scrolls further back can come later; the strip covers the week that streaks
@@ -35,7 +35,15 @@ export function WeekStrip({ selected, onSelect }: WeekStripProps) {
         const isSelected = day === selected;
         const isToday = day === today;
         const [year, month, date] = day.split('-').map(Number);
-        const weekday = new Date(year, month - 1, date).getDay();
+        const asDate = new Date(year, month - 1, date);
+        const weekday = asDate.getDay();
+        // Spoken as "Tuesday 23 September", not read digit by digit off the
+        // ISO string "2026-09-23" the label used to carry.
+        const spoken = asDate.toLocaleDateString(language, {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+        });
 
         return (
           <Pressable
@@ -43,7 +51,7 @@ export function WeekStrip({ selected, onSelect }: WeekStripProps) {
             onPress={() => onSelect(day)}
             accessibilityRole="button"
             accessibilityState={{ selected: isSelected }}
-            accessibilityLabel={t('week.showDay', { date: day })}
+            accessibilityLabel={t('week.showDay', { date: spoken })}
             style={styles.dayHit}
           >
             <Text style={[styles.letter, isSelected && styles.letterSelected]}>
@@ -81,7 +89,7 @@ const styles = StyleSheet.create({
   letter: {
     fontFamily: fontFamily.semiBold,
     fontSize: 11,
-    color: color.inkFaint,
+    color: color.inkMuted,
   },
   letterSelected: { color: color.accent },
   circle: {

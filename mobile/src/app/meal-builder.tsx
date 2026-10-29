@@ -168,6 +168,7 @@ export default function MealBuilderScreen() {
 }
 
 function IngredientRow({ item, french }: { item: DraftMealItem; french: boolean }) {
+  const t = useT();
   const name = french ? item.nameFr : item.nameEn;
   const step = amountStep(item.unit);
   const suffix = unitSuffix(item.unit);
@@ -200,7 +201,7 @@ function IngredientRow({ item, french }: { item: DraftMealItem; french: boolean 
         <Pressable
           onPress={() => nudge(-step)}
           accessibilityRole="button"
-          accessibilityLabel={`- ${name}`}
+          accessibilityLabel={t('a11y.less', { name })}
           style={styles.stepButton}
         >
           <Text style={styles.stepGlyph}>−</Text>
@@ -212,7 +213,7 @@ function IngredientRow({ item, french }: { item: DraftMealItem; french: boolean 
         <Pressable
           onPress={() => nudge(step)}
           accessibilityRole="button"
-          accessibilityLabel={`+ ${name}`}
+          accessibilityLabel={t('a11y.more', { name })}
           style={styles.stepButton}
         >
           <Text style={styles.stepGlyph}>+</Text>
@@ -222,7 +223,7 @@ function IngredientRow({ item, french }: { item: DraftMealItem; french: boolean 
       <PressableScale
         onPress={() => draftActions.removeItem(item.slug)}
         accessibilityRole="button"
-        accessibilityLabel={`x ${name}`}
+        accessibilityLabel={t('a11y.remove', { name })}
         style={styles.remove}
       >
         <Text style={styles.removeGlyph}>×</Text>
@@ -266,7 +267,7 @@ const styles = StyleSheet.create({
   macros: { flexDirection: 'row', gap: space.sm },
   macro: { flex: 1, alignItems: 'center', paddingVertical: space.sm, borderRadius: radius.sm },
   macroValue: { ...text.label, fontSize: 14 },
-  macroLabel: { ...text.overline, fontSize: 9, color: color.inkMuted },
+  macroLabel: { ...text.overline, fontSize: 11, color: color.inkMuted },
 
   empty: { paddingVertical: space.xl },
 
@@ -287,6 +288,6 @@ const styles = StyleSheet.create({
   remove: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   removeGlyph: { ...text.bodyMuted, fontSize: 20, lineHeight: 22 },
 
-  error: { ...text.bodyMuted, color: color.danger, fontSize: 13 },
+  error: { ...text.bodyMuted, color: color.dangerText, fontSize: 13 },
   hint: { ...text.bodyMuted, fontSize: 12, textAlign: 'center' },
 });

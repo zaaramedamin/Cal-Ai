@@ -709,6 +709,44 @@ export const en = {
   'food.quantitySection': 'Quantity',
   'food.amountIn': 'Amount in {unit}',
   'food.logAmount': 'Log {amount} {unit}',
+
+  // Where a food's numbers come from, named. INNTA and Ciqual used to fall
+  // through to the raw database value, so a Tunisian food said "Source: innta".
+  'food.sourceUsda': 'USDA FoodData Central',
+  'food.sourceOffName': 'Open Food Facts',
+  'food.sourceInnta': 'INNTA — Tunisian food composition table',
+  'food.sourceCiqual': 'Ciqual — French food composition table (ANSES)',
+  'food.sourceYou': 'You',
+  'food.sourceAi': 'AI estimate',
+
+  // Strings that were typed straight into screens, found by an audit.
+  'home.macroLeft': 'left',
+  'home.macroOver': 'over',
+  'home.servingOne': '1 serving',
+  'home.servingMany': '{count} servings',
+  'home.partialNote': 'Some foods didn’t report every nutrient, so some totals are minimums.',
+  'a11y.quickAdd': 'Log {grams} g of {name}',
+  'a11y.suggestion': '{name}, {grams} grams',
+  'a11y.logMeal': 'Log {name}',
+  'a11y.more': 'More {name}',
+  'a11y.less': 'Less {name}',
+  'a11y.remove': 'Remove {name}',
+  'search.popularFootnote': 'Tap one to look it up.',
+  'scan.itemsFoundOne': '1 item found',
+  'scan.itemsFoundMany': '{count} items found',
+  'scan.retake': 'Retake',
+  'scan.honesty':
+    'Portions are AI estimates — check them before logging. The nutrition numbers come from the food database, not the AI.',
+  'scan.estimateOne':
+    '1 food isn’t in the food database, so its numbers are the AI’s own estimate. Treat them as approximate.',
+  'scan.estimateMany':
+    '{count} foods aren’t in the food database, so their numbers are the AI’s own estimate. Treat them as approximate.',
+  'scan.estimateBadge': 'AI estimate — not from the database',
+  'scan.unmatchedOne':
+    '1 item had no match in the food database. Rather than invent numbers for it, Cal Ai leaves it out — search manually to add it.',
+  'scan.unmatchedMany':
+    '{count} items had no match in the food database. Rather than invent numbers for them, Cal Ai leaves them out — search manually to add them.',
+  'progress.weightFailed': 'Couldn’t save that weight. Check your connection and try again.',
 } as const;
 
 export type StringKey = keyof typeof en;
@@ -1338,6 +1376,42 @@ export const fr: Dictionary = {
   'food.quantitySection': 'Quantité',
   'food.amountIn': 'Quantité en {unit}',
   'food.logAmount': 'Enregistrer {amount} {unit}',
+
+  'food.sourceUsda': 'USDA FoodData Central',
+  'food.sourceOffName': 'Open Food Facts',
+  'food.sourceInnta': 'INNTA — table de composition des aliments tunisiens',
+  'food.sourceCiqual': 'Ciqual — table de composition des aliments (ANSES)',
+  'food.sourceYou': 'Vous',
+  'food.sourceAi': 'Estimation IA',
+
+  'home.macroLeft': 'restants',
+  'home.macroOver': 'en trop',
+  'home.servingOne': '1 portion',
+  'home.servingMany': '{count} portions',
+  'home.partialNote':
+    'Certains aliments ne précisent pas tous leurs nutriments : certains totaux sont donc des minimums.',
+  'a11y.quickAdd': 'Enregistrer {grams} g de {name}',
+  'a11y.suggestion': '{name}, {grams} grammes',
+  'a11y.logMeal': 'Enregistrer {name}',
+  'a11y.more': 'Plus de {name}',
+  'a11y.less': 'Moins de {name}',
+  'a11y.remove': 'Retirer {name}',
+  'search.popularFootnote': 'Touchez-en un pour le rechercher.',
+  'scan.itemsFoundOne': '1 aliment trouvé',
+  'scan.itemsFoundMany': '{count} aliments trouvés',
+  'scan.retake': 'Reprendre',
+  'scan.honesty':
+    'Les portions sont estimées par l’IA — vérifiez-les avant d’enregistrer. Les valeurs nutritionnelles viennent de la base d’aliments, pas de l’IA.',
+  'scan.estimateOne':
+    '1 aliment n’est pas dans la base : ses valeurs sont une estimation de l’IA. Considérez-les comme approximatives.',
+  'scan.estimateMany':
+    '{count} aliments ne sont pas dans la base : leurs valeurs sont une estimation de l’IA. Considérez-les comme approximatives.',
+  'scan.estimateBadge': 'Estimation IA — hors base',
+  'scan.unmatchedOne':
+    '1 aliment n’a aucune correspondance dans la base. Plutôt que d’inventer des chiffres, Cal Ai le laisse de côté — recherchez-le manuellement pour l’ajouter.',
+  'scan.unmatchedMany':
+    '{count} aliments n’ont aucune correspondance dans la base. Plutôt que d’inventer des chiffres, Cal Ai les laisse de côté — recherchez-les manuellement pour les ajouter.',
+  'progress.weightFailed': 'Impossible d’enregistrer ce poids. Vérifiez votre connexion et réessayez.',
 };
 
 export type Language = 'en' | 'fr';

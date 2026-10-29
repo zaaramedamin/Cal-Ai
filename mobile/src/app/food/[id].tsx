@@ -28,10 +28,12 @@ import {
   getFood,
   logFood,
 } from '@/api/diary';
+import { BackHeader } from '@/components/back-header';
 import { Button } from '@/components/button';
 import { MacroBar } from '@/components/macro-bar';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { parseDecimal } from '@/lib/units';
 import { HOME } from '@/routes';
 import { HIT_SLOP_MIN, color, radius, space } from '@/theme/tokens';
 import { text } from '@/theme/typography';
@@ -40,11 +42,13 @@ import { useT } from '@/i18n';
 import type { StringKey } from '@/i18n/strings';
 
 /** How each source is named to the user. */
-const SOURCE_LABELS: Record<string, string> = {
-  usda: 'USDA FoodData Central',
-  off: 'Open Food Facts',
-  user: 'You',
-  ai_estimate: 'AI estimate',
+const SOURCE_LABELS: Record<string, StringKey> = {
+  usda: 'food.sourceUsda',
+  off: 'food.sourceOffName',
+  innta: 'food.sourceInnta',
+  ciqual: 'food.sourceCiqual',
+  user: 'food.sourceYou',
+  ai_estimate: 'food.sourceAi',
 };
 
 /**
@@ -113,7 +117,8 @@ export default function FoodDetailScreen() {
     };
   }, [id]);
 
-  const quantity = Number(grams);
+  // parseDecimal, not Number: a French keypad types "12,5".
+  const quantity = parseDecimal(grams) ?? Number.NaN;
   const valid = Number.isFinite(quantity) && quantity > 0;
 
   // Scaled live from the per-100 g values, so the numbers on screen are always
@@ -179,6 +184,7 @@ export default function FoodDetailScreen() {
   if (!food || !scaled) {
     return (
       <Screen>
+        <BackHeader />
         {/* Centred properly: `flex: 1` on the wrapper plus `justifyContent`,
             rather than relying on whatever height the content happened to have.
             The spinner used to sit just under the status bar. */}
@@ -194,8 +200,16 @@ export default function FoodDetailScreen() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={text.overline}>{t('catalogue.addTo', { slot: t(`slot.${chosenSlot}`) })}</Text>
+      {/* Every screen hides the native header, and this one had no way back but
+          the system gesture — which Android users find and iOS users often
+          don't. */}
+      <BackHeader title={t('catalogue.addTo', { slot: t(`slot.${chosenSlot}`) })} />
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={text.title}>{food.name}</Text>
         {food.brand && <Text style={[text.bodyMuted, styles.brand]}>{food.brand}</Text>}
 
@@ -310,7 +324,8 @@ export default function FoodDetailScreen() {
             them differently. Printing a bare source id told them nothing. */}
         <View style={styles.sourceBlock}>
           <Text style={styles.source}>
-            {t('food.source')}: {SOURCE_LABELS[food.source] ?? food.source}
+            {t('food.source')}:{' '}
+            {SOURCE_LABELS[food.source] ? t(SOURCE_LABELS[food.source]) : food.source}
             {food.source_id.startsWith('user:') ? '' : ` · ${food.source_id}`}
           </Text>
           {SOURCE_CAVEATS[food.source] && (
@@ -331,22 +346,25 @@ export default function FoodDetailScreen() {
           <Ionicons name="flag-outline" size={15} color={color.inkMuted} />
           <Text style={styles.reportLabel}>{t('report.link')}</Text>
         </Pressable>
+      </ScrollView>
 
+      {/* Pinned below the scroll, not at the end of it. The button is the reason
+          this screen exists, and it sat under the whole nutrient table — below
+          the fold on every phone, so logging a food meant scrolling past
+          information most people never read. */}
+      <View style={styles.actions}>
         {error && (
           <View style={styles.callout} accessibilityRole="alert">
             <Text style={styles.calloutText}>{error}</Text>
           </View>
         )}
-
-        <View style={styles.actions}>
-          <Button
-            label={t('food.logAmount', { amount: quantity || 0, unit })}
-            disabled={!valid}
-            loading={saving}
-            onPress={() => void handleLog()}
-          />
-        </View>
-      </ScrollView>
+        <Button
+          label={t('food.logAmount', { amount: valid ? quantity : 0, unit })}
+          disabled={!valid}
+          loading={saving}
+          onPress={() => void handleLog()}
+        />
+      </View>
     </Screen>
   );
 }
@@ -393,12 +411,12 @@ const styles = StyleSheet.create({
     padding: space.md,
     gap: space.xs,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(200, 62, 46, 0.08)',
+    backgroundColor: color.dangerTint,
     borderLeftWidth: 3,
     borderLeftColor: color.danger,
   },
   withdrawnHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  withdrawnTitle: { ...text.label, fontSize: 13, color: color.danger },
+  withdrawnTitle: { ...text.label, fontSize: 13, color: color.dangerText },
   withdrawnBody: { ...text.body, fontSize: 13, lineHeight: 19 },
 
   content: { paddingBottom: space.xxl },
@@ -465,13 +483,17 @@ const styles = StyleSheet.create({
   source: { ...text.bodyMuted, fontSize: 11 },
   sourceCaveat: { ...text.bodyMuted, fontSize: 11, lineHeight: 16, fontStyle: 'italic' },
   callout: {
-    marginTop: space.lg,
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: color.inkWash,
+    backgroundColor: color.dangerTint,
     borderLeftWidth: 3,
-    borderLeftColor: color.clayDeep,
+    borderLeftColor: color.danger,
   },
   calloutText: { ...text.body, fontSize: 14 },
-  actions: { marginTop: space.xl },
+  actions: {
+    gap: space.md,
+    paddingTop: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.hairline,
+  },
 });

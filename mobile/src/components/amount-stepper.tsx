@@ -107,6 +107,8 @@ const styles = StyleSheet.create({
   root: { gap: space.md },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: {
+    minHeight: 40,
+    justifyContent: 'center',
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
     borderRadius: radius.pill,

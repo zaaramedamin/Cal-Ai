@@ -43,8 +43,18 @@ const MIN_QUERY_LENGTH = 2;
 type State =
   | { kind: 'idle' }
   | { kind: 'searching' }
-  | { kind: 'results'; results: FoodSearchResult[]; cachedOnly: boolean }
+  /**
+   * `refreshing` is a newer query in flight while these results stay on screen.
+   * The list used to be swapped for a spinner on every keystroke, so typing
+   * "chicken" flashed the results away and back six times.
+   */
+  | { kind: 'results'; results: FoodSearchResult[]; cachedOnly: boolean; refreshing: boolean }
   | { kind: 'error'; message: string };
+
+/** Keep what is on screen while a new query runs, if there is anything. */
+function pending(current: State): State {
+  return current.kind === 'results' ? { ...current, refreshing: true } : { kind: 'searching' };
+}
 
 export default function SearchScreen() {
   const router = useRouter();
@@ -112,7 +122,7 @@ export default function SearchScreen() {
         setState({ kind: 'idle' });
         return;
       }
-      setState({ kind: 'searching' });
+      setState(pending);
       try {
         const response = await searchFoods(term);
         if (latestQuery.current !== term) return;
@@ -120,6 +130,7 @@ export default function SearchScreen() {
           kind: 'results',
           results: response.results,
           cachedOnly: response.upstream_unavailable,
+          refreshing: false,
         });
       } catch (caught) {
         if (latestQuery.current !== term) return;
@@ -138,7 +149,7 @@ export default function SearchScreen() {
       return;
     }
 
-    setState({ kind: 'searching' });
+    setState(pending);
     const timer = setTimeout(() => void runSearch(trimmed), DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [query, searchOverride, runSearch]);
@@ -146,13 +157,18 @@ export default function SearchScreen() {
   return (
     <Screen>
       <View style={styles.header}>
-        <Text style={text.overline}>
-          {pickingIngredient
-            ? t('catalogue.addIngredient')
-            : slot
-              ? t('catalogue.addTo', { slot: t(`slot.${slot}`) })
-              : t('home.searchFood')}
-        </Text>
+        <View style={styles.headerTitle}>
+          <Text style={text.overline}>
+            {pickingIngredient
+              ? t('catalogue.addIngredient')
+              : slot
+                ? t('catalogue.addTo', { slot: t(`slot.${slot}`) })
+                : t('home.searchFood')}
+          </Text>
+          {state.kind === 'results' && state.refreshing && (
+            <ActivityIndicator size="small" color={color.accent} />
+          )}
+        </View>
         <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancel}>
           <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
         </Pressable>
@@ -199,7 +215,7 @@ export default function SearchScreen() {
 
       {state.kind === 'searching' && (
         <View style={styles.centered}>
-          <ActivityIndicator color={color.clay} />
+          <ActivityIndicator color={color.accent} />
           <Text style={[text.bodyMuted, styles.searchingLabel]}>{t('search.searching')}</Text>
         </View>
       )}
@@ -269,7 +285,7 @@ export default function SearchScreen() {
                     });
                   }}
                   accessibilityRole="button"
-                  style={styles.row}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 >
                   <View style={styles.rowText}>
                     <Text style={text.label} numberOfLines={1}>
@@ -282,7 +298,12 @@ export default function SearchScreen() {
                       <MacroBar macros={item} scale="row" />
                     </View>
                   </View>
-                  <Text style={styles.rowKcal}>{Math.round(item.kcal)}</Text>
+                  {/* With its unit. A bare "165" beside a food could as easily be
+                      grams, and the row already says "per 100 g" once. */}
+                  <View style={styles.rowKcalBlock}>
+                    <Text style={styles.rowKcal}>{Math.round(item.kcal)}</Text>
+                    <Text style={styles.rowKcalUnit}>{t('common.kcal')}</Text>
+                  </View>
                 </Pressable>
               )}
             />
@@ -308,6 +329,7 @@ function PopularGrid({
   foods: PopularFood[];
   onPick: (food: PopularFood) => void;
 }) {
+  const t = useT();
   const categories = foods.reduce<Record<string, PopularFood[]>>((groups, food) => {
     (groups[food.category] ??= []).push(food);
     return groups;
@@ -340,9 +362,9 @@ function PopularGrid({
           </View>
         </View>
       ))}
-      <Text style={styles.gridFootnote}>
-        Tap one to look it up. Every number still comes from USDA FoodData Central.
-      </Text>
+      {/* Translated, and no longer claiming every number is USDA's: since the
+          INNTA and Ciqual imports, most of what a tile finds is not. */}
+      <Text style={styles.gridFootnote}>{t('search.popularFootnote')}</Text>
     </ScrollView>
   );
 }
@@ -363,7 +385,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.surface,
   },
   tileEmoji: { fontSize: 26 },
-  tileName: { ...text.bodyMuted, fontSize: 10, textAlign: 'center', lineHeight: 12 },
+  tileName: { ...text.bodyMuted, fontSize: 11, textAlign: 'center', lineHeight: 14 },
   gridFootnote: { ...text.bodyMuted, fontSize: 11, textAlign: 'center' },
   header: {
     flexDirection: 'row',
@@ -371,8 +393,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: space.md,
   },
+  headerTitle: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flexShrink: 1 },
   cancel: { minHeight: HIT_SLOP_MIN, justifyContent: 'center', paddingLeft: space.md },
-  cancelLabel: { ...text.label, color: color.clay },
+  cancelLabel: { ...text.label, color: color.accent },
   centered: {
     flex: 1,
     alignItems: 'center',
@@ -391,17 +414,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: color.hairline,
   },
+  rowPressed: { backgroundColor: color.wash },
   rowText: { flex: 1, gap: 3 },
   rowMeta: { ...text.bodyMuted, fontSize: 12 },
   rowBar: { marginTop: space.xs },
-  rowKcal: { ...text.numeric },
+  rowKcalBlock: { alignItems: 'flex-end' },
+  rowKcal: { ...text.numeric, fontSize: 15 },
+  rowKcalUnit: { ...text.bodyMuted, fontSize: 11 },
   callout: {
     marginTop: space.lg,
     padding: space.lg,
     borderRadius: radius.md,
-    backgroundColor: color.inkWash,
+    backgroundColor: color.dangerTint,
     borderLeftWidth: 3,
-    borderLeftColor: color.clayDeep,
+    borderLeftColor: color.danger,
     gap: space.xs,
   },
   calloutTitle: { ...text.label },
@@ -410,9 +436,9 @@ const styles = StyleSheet.create({
     marginTop: space.md,
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: color.inkWash,
+    backgroundColor: color.warningTint,
     borderLeftWidth: 3,
-    borderLeftColor: color.carbs,
+    borderLeftColor: color.warning,
   },
   noticeText: { ...text.bodyMuted, fontSize: 13 },
 });

@@ -270,12 +270,12 @@ const styles = StyleSheet.create({
   statRow: { flexDirection: 'row', gap: space.lg },
   stat: { gap: 1 },
   statValue: { ...text.numeric, fontSize: 18 },
-  statLabel: { ...text.overline, fontSize: 9, color: color.inkMuted },
+  statLabel: { ...text.overline, fontSize: 11, color: color.inkMuted },
 
   bmiBlock: { gap: space.xs, marginTop: space.xs },
   bmiHead: { flexDirection: 'row', alignItems: 'baseline', gap: space.xs },
   bmiValue: { ...text.numeric, fontSize: 16 },
-  bmiLabel: { ...text.overline, fontSize: 9, color: color.inkMuted },
+  bmiLabel: { ...text.overline, fontSize: 11, color: color.inkMuted },
   bmiTrack: {
     height: 4,
     borderRadius: radius.pill,
@@ -290,8 +290,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: color.accent,
   },
-  caveat: { ...text.bodyMuted, fontSize: 10, lineHeight: 13 },
+  caveat: { ...text.bodyMuted, fontSize: 11, lineHeight: 15 },
 
   remaining: { ...text.bodyMuted, fontSize: 12 },
-  reached: { ...text.bodyMuted, fontSize: 12, color: color.positive },
+  reached: { ...text.bodyMuted, fontSize: 12, color: color.positiveText },
 });

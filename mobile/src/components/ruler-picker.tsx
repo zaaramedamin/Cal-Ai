@@ -45,6 +45,8 @@ interface RulerPickerProps {
   formatValue?: (value: number) => string;
   /** Marks one value on the scale, e.g. current weight under a target picker. */
   reference?: { value: number; label: string };
+  /** What a screen reader calls the control — "Height", "Weight". */
+  accessibilityLabel?: string;
 }
 
 export function RulerPicker({
@@ -56,6 +58,7 @@ export function RulerPicker({
   unit,
   formatValue,
   reference,
+  accessibilityLabel,
 }: RulerPickerProps) {
   const scrollRef = useRef<ScrollView>(null);
 
@@ -99,10 +102,27 @@ export function RulerPicker({
     }
   }
 
+  const shown = formatValue ? formatValue(value) : String(Math.round(value));
+
   return (
-    <View>
+    // One "adjustable" element for screen readers. A horizontal ScrollView of
+    // tick marks cannot be operated by VoiceOver or TalkBack at all, so height
+    // and weight — both required to finish onboarding — were unreachable.
+    // Swiping up or down now steps the value, exactly as it does on a native
+    // picker.
+    <View
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={{ text: unit && !formatValue ? `${shown} ${unit}` : shown }}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={(event) => {
+        const delta = event.nativeEvent.actionName === 'increment' ? 1 : -1;
+        onChange(Math.min(max, Math.max(min, Math.round(value) + delta)));
+      }}
+    >
       <View style={styles.readout}>
-        <Text style={styles.value}>{formatValue ? formatValue(value) : Math.round(value)}</Text>
+        <Text style={styles.value}>{shown}</Text>
         {unit && !formatValue && <Text style={styles.unit}>{unit}</Text>}
       </View>
 

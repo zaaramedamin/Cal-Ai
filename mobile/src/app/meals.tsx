@@ -158,7 +158,7 @@ export default function MealsScreen() {
                     onPress={() => askSlotAndLog(meal)}
                     onLongPress={() => confirmDelete(meal)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Log ${meal.name}`}
+                    accessibilityLabel={t('a11y.logMeal', { name: meal.name })}
                   >
                     <View style={styles.cardHead}>
                       <View style={styles.cardTitles}>
@@ -304,9 +304,9 @@ const styles = StyleSheet.create({
   macros: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
   macro: { flex: 1, alignItems: 'center', paddingVertical: space.sm, borderRadius: radius.sm },
   macroValue: { ...text.label, fontSize: 14 },
-  macroLabel: { ...text.overline, fontSize: 9, color: color.inkMuted },
+  macroLabel: { ...text.overline, fontSize: 11, color: color.inkMuted },
 
-  warning: { ...text.bodyMuted, fontSize: 12, color: color.warning, marginTop: space.sm },
+  warning: { ...text.bodyMuted, fontSize: 12, color: color.warningText, marginTop: space.sm },
 
   cardActions: {
     flexDirection: 'row',

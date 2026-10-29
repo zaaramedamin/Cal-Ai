@@ -83,10 +83,12 @@ export function MacroBar({
         accessibilityLabel={
           isEmpty
             ? t('macro.noneLogged')
-            : t('macro.reading', {
-                protein: macros.protein_g,
-                carbs: macros.carbs_g,
-                fat: macros.fat_g,
+            : // Rounded: a scaled portion is full of fractions, and a screen
+              // reader will read "23.456789 grams" to the last digit.
+              t('macro.reading', {
+                protein: Math.round(macros.protein_g),
+                carbs: Math.round(macros.carbs_g),
+                fat: Math.round(macros.fat_g),
               })
         }
       >

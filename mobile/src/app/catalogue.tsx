@@ -16,12 +16,14 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { apiErrorMessage } from '@/api/errors';
 import {
@@ -252,6 +254,7 @@ function PortionSheet({
   onAdded: () => void;
 }) {
   const t = useT();
+  const insets = useSafeAreaInsets();
   const preferred = food.portions.find((portion) => portion.is_default) ?? food.portions[0];
   const [amount, setAmount] = useState(preferred?.amount ?? 1);
   const [busy, setBusy] = useState(false);
@@ -280,8 +283,16 @@ function PortionSheet({
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" />
-      <View style={styles.sheet}>
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel={t('common.close')}
+      />
+      {/* The home-indicator inset added to the sheet's own padding. A modal
+          draws outside the Screen wrapper, so nothing else accounts for it, and
+          the Log button sat on top of the home bar on every notched iPhone. */}
+      <View style={[styles.sheet, { paddingBottom: space.xl + insets.bottom }]}>
         <View style={styles.sheetHandle} />
 
         <View style={styles.sheetHead}>
@@ -354,7 +365,13 @@ const styles = StyleSheet.create({
   },
   centeredBody: { textAlign: 'center', lineHeight: 21 },
   emptyGlyph: { fontSize: 44 },
-  code: { ...text.bodyMuted, fontFamily: 'monospace', color: color.ink },
+  // 'monospace' is Android's name for it; iOS has no font by that name, logs a
+  // warning and falls back to the proportional system font.
+  code: {
+    ...text.bodyMuted,
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+    color: color.ink,
+  },
 
   scroll: { paddingBottom: space.xxxl, gap: space.xl },
   section: { gap: space.sm },
@@ -373,7 +390,7 @@ const styles = StyleSheet.create({
   },
   tileOn: { backgroundColor: color.accentTint },
   tileName: { ...text.label, fontSize: 12, textAlign: 'center', lineHeight: 14 },
-  tileKcal: { ...text.bodyMuted, fontSize: 10 },
+  tileKcal: { ...text.bodyMuted, fontSize: 11 },
   tileTick: {
     position: 'absolute',
     top: space.sm,
@@ -397,13 +414,12 @@ const styles = StyleSheet.create({
   draftCount: { ...text.label, color: color.onDark },
   draftAction: { ...text.label, color: color.onDark, opacity: 0.75 },
 
-  backdrop: { flex: 1, backgroundColor: 'rgba(11, 16, 32, 0.45)' },
+  backdrop: { flex: 1, backgroundColor: color.scrim },
   sheet: {
     backgroundColor: color.surface,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     padding: space.xl,
-    paddingBottom: space.xxl,
     gap: space.lg,
   },
   sheetHandle: {
@@ -427,8 +443,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     minWidth: 44,
   },
-  macroLabel: { ...text.overline, fontSize: 9 },
+  macroLabel: { ...text.overline, fontSize: 11 },
   macroValue: { ...text.label, fontSize: 13 },
 
-  error: { ...text.bodyMuted, color: color.danger, fontSize: 13 },
+  error: { ...text.bodyMuted, color: color.dangerText, fontSize: 13 },
 });

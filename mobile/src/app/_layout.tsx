@@ -84,7 +84,7 @@ function RootNavigator() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: color.paper },
+        contentStyle: { backgroundColor: color.canvas },
       }}
     />
   );

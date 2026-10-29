@@ -32,9 +32,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { slotForNow } from '@/api/diary';
 import { currentSelectedDay } from '@/features/diary/selected-day';
 import { useT } from '@/i18n';
-import { HIT_SLOP_MIN, color, elevation, radius, space } from '@/theme/tokens';
+import { color, elevation, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
 /**
@@ -126,7 +127,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
         style={[styles.dock, { paddingBottom: Math.max(insets.bottom, space.md) }]}
         pointerEvents="box-none"
       >
-      <View style={styles.pill}>
+      <View style={styles.pill} accessibilityRole="tablist">
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
           const label = options.title ?? route.name;
@@ -135,10 +136,13 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
           return (
             <Pressable
               key={route.key}
-              accessibilityRole="button"
-              accessibilityState={focused ? { selected: true } : {}}
+              // "tab" rather than "button", so a screen reader says "Home, tab,
+              // 1 of 3" and the user knows they are choosing a place.
+              accessibilityRole="tab"
+              accessibilityState={{ selected: focused }}
               accessibilityLabel={label}
-              hitSlop={HIT_SLOP_MIN}
+              // No hitSlop. Each tab is already ~48pt tall, and a 44pt slop on
+              // every side overlapped the neighbouring tabs.
               onPress={() => {
                 const event = navigation.emit({
                   type: 'tabPress',
@@ -155,9 +159,9 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
               style={[styles.tab, focused && styles.tabActive]}
             >
               <Ionicons
-                name={ICONS[route.name] ?? 'ellipse'}
+                name={focused ? (ICONS[route.name] ?? 'ellipse') : outline(ICONS[route.name])}
                 size={20}
-                color={focused ? color.accent : color.inkFaint}
+                color={focused ? color.accent : color.inkMuted}
               />
               <Text style={[styles.label, focused && styles.labelActive]}>{label}</Text>
             </Pressable>
@@ -169,7 +173,9 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
         accessibilityRole="button"
         accessibilityLabel={menuOpen ? t('a11y.closeLogMenu') : t('a11y.logFood')}
         accessibilityState={{ expanded: menuOpen }}
-        hitSlop={HIT_SLOP_MIN}
+        // No hitSlop: the button is 58pt already. A 44pt slop reached ~36pt into
+        // the pill beside it, and because this button is drawn on top, a tap on
+        // the right-hand side of the last tab opened the log menu instead.
         onPress={() => setMenuOpen((open) => !open)}
         style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
       >
@@ -202,13 +208,18 @@ function MenuRow({
   );
 }
 
-/** Which meal the catalogue and search assume, by hour. */
-function slotForNow(): 'breakfast' | 'lunch' | 'dinner' | 'snack' {
-  const hour = new Date().getHours();
-  if (hour < 11) return 'breakfast';
-  if (hour < 15) return 'lunch';
-  if (hour < 18) return 'snack';
-  return 'dinner';
+/**
+ * The outline variant of a tab icon, for tabs that are not selected.
+ *
+ * Filled for the current tab and outlined for the rest, so the selection reads
+ * by shape as well as colour — colour alone is exactly what a colour-blind user
+ * cannot see.
+ */
+function outline(name: keyof typeof Ionicons.glyphMap | undefined): keyof typeof Ionicons.glyphMap {
+  const candidate = `${name ?? 'ellipse'}-outline`;
+  return candidate in Ionicons.glyphMap
+    ? (candidate as keyof typeof Ionicons.glyphMap)
+    : (name ?? 'ellipse');
 }
 
 const styles = StyleSheet.create({
@@ -247,7 +258,9 @@ const styles = StyleSheet.create({
   label: {
     fontFamily: fontFamily.semiBold,
     fontSize: 11,
-    color: color.inkFaint,
+    // inkMuted, not inkFaint: the faint grey is 2.2:1 and the labels of the
+    // tabs you are *not* on are exactly the ones you need to read.
+    color: color.inkMuted,
   },
   labelActive: { color: color.accent, fontFamily: fontFamily.bold },
   action: {
@@ -261,7 +274,7 @@ const styles = StyleSheet.create({
   },
   actionPressed: { opacity: 0.88, transform: [{ scale: 0.95 }] },
 
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.40)' },
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: color.scrim },
   menu: { position: 'absolute', right: space.md, gap: space.sm, alignItems: 'flex-end' },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   menuLabelPill: {

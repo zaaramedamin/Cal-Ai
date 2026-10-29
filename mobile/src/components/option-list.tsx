@@ -80,8 +80,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   optionSelected: {
-    borderColor: color.clay,
-    backgroundColor: color.inkWash,
+    borderColor: color.accent,
+    backgroundColor: color.accentTint,
   },
   optionPressed: {
     opacity: 0.7,
@@ -108,12 +108,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   radioSelected: {
-    borderColor: color.clay,
+    borderColor: color.accent,
   },
   radioDot: {
     width: 10,
     height: 10,
     borderRadius: radius.pill,
-    backgroundColor: color.clay,
+    backgroundColor: color.accent,
   },
 });

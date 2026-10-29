@@ -46,6 +46,16 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 }
 
+/**
+ * Horizontal room kept clear at each end of the curves.
+ *
+ * The endpoint dots are drawn *on* the first and last points, and with the
+ * curves running from x=0 to x=W exactly, half of every dot fell outside the
+ * viewBox and was clipped into a semicircle. The inset is the dot's radius plus
+ * its stroke.
+ */
+const INSET_X = 8;
+
 function curvePath(
   width: number,
   height: number,
@@ -57,7 +67,7 @@ function curvePath(
   const points: string[] = [];
   for (let i = 0; i <= steps; i += 1) {
     const t = i / steps;
-    const x = t * width;
+    const x = INSET_X + t * (width - INSET_X * 2);
     const y = from + (to - from) * ease(t);
     points.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`);
   }
@@ -97,30 +107,39 @@ export function ProjectionChart({
     <View style={styles.wrap}>
       <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
         <Defs>
+          {/* The plan in the action colour, the counterfactual in neutral grey.
+              These were fat-blue and protein-red, which on a nutrition app read
+              as two macros rather than "with" and "without". */}
           <LinearGradient id="withFill" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={color.fat} stopOpacity="0.28" />
-            <Stop offset="1" stopColor={color.fat} stopOpacity="0.02" />
+            <Stop offset="0" stopColor={color.accent} stopOpacity="0.24" />
+            <Stop offset="1" stopColor={color.accent} stopOpacity="0.02" />
           </LinearGradient>
           <LinearGradient id="withoutFill" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={color.protein} stopOpacity="0.14" />
-            <Stop offset="1" stopColor={color.protein} stopOpacity="0.02" />
+            <Stop offset="0" stopColor={color.ink} stopOpacity="0.06" />
+            <Stop offset="1" stopColor={color.ink} stopOpacity="0.01" />
           </LinearGradient>
         </Defs>
 
-        <Path d={`${withoutPath} L${W},${H} L0,${H} Z`} fill="url(#withoutFill)" />
-        <Path d={`${withPath} L${W},${H} L0,${H} Z`} fill="url(#withFill)" />
+        <Path d={`${withoutPath} L${W - INSET_X},${H} L${INSET_X},${H} Z`} fill="url(#withoutFill)" />
+        <Path d={`${withPath} L${W - INSET_X},${H} L${INSET_X},${H} Z`} fill="url(#withFill)" />
 
-        <Path d={withoutPath} stroke={color.protein} strokeWidth={2.5} fill="none" />
-        <Path d={withPath} stroke={color.fat} strokeWidth={3} fill="none" />
+        <Path
+          d={withoutPath}
+          stroke={color.inkFaint}
+          strokeWidth={2.5}
+          strokeDasharray="6 5"
+          fill="none"
+        />
+        <Path d={withPath} stroke={color.accent} strokeWidth={3} fill="none" />
 
-        <Circle cx={0} cy={startY} r={5} fill={color.surface} stroke={color.fat} strokeWidth={3} />
-        <Circle cx={W} cy={endY} r={5} fill={color.surface} stroke={color.fat} strokeWidth={3} />
+        <Circle cx={INSET_X} cy={startY} r={5} fill={color.surface} stroke={color.accent} strokeWidth={3} />
+        <Circle cx={W - INSET_X} cy={endY} r={5} fill={color.surface} stroke={color.accent} strokeWidth={3} />
         <Circle
-          cx={W}
+          cx={W - INSET_X}
           cy={withoutEndY}
           r={5}
           fill={color.surface}
-          stroke={color.protein}
+          stroke={color.inkFaint}
           strokeWidth={3}
         />
       </Svg>
@@ -140,7 +159,11 @@ export function ProjectionChart({
 
       <Text style={[styles.axis, styles.axisLeft]}>{t('chart.now')}</Text>
       <Text style={[styles.axis, styles.axisRight]}>{endLabel}</Text>
-      <Text style={styles.withoutLabel}>{t('chart.without')}</Text>
+      {/* Placed from where the grey line actually ends. It was pinned near the
+          top, which is right for losing weight and put it beside the *wrong*
+          line for gaining, where the grey curve finishes low. The SVG's height
+          is H pixels with no vertical scaling, so the y maps directly. */}
+      <Text style={[styles.withoutLabel, { top: withoutEndY - 26 }]}>{t('chart.without')}</Text>
     </View>
   );
 }
@@ -153,11 +176,11 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: radius.sm,
   },
-  pillStart: { top: 0, left: 0, backgroundColor: 'rgba(76, 134, 232, 0.14)' },
-  pillEnd: { backgroundColor: color.fat },
+  pillStart: { top: 0, left: 0, backgroundColor: color.accentTint },
+  pillEnd: { backgroundColor: color.accent },
   pillLow: { bottom: 40, right: 0 },
   pillHigh: { top: 0, right: 0 },
-  pillStartText: { ...text.numeric, fontSize: 13, color: color.fat },
+  pillStartText: { ...text.numeric, fontSize: 13, color: color.accent },
   pillEndText: { ...text.numeric, fontSize: 13, color: color.onDark },
   axis: { ...text.bodyMuted, fontSize: 12, position: 'absolute', bottom: 0 },
   axisLeft: { left: 0 },
@@ -165,9 +188,8 @@ const styles = StyleSheet.create({
   withoutLabel: {
     ...text.label,
     fontSize: 12,
-    color: color.protein,
+    color: color.inkMuted,
     position: 'absolute',
-    top: 34,
     right: 0,
   },
 });

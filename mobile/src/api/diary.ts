@@ -16,6 +16,22 @@ export type MealSlot = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
 export const MEAL_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner', 'snack'];
 
+/**
+ * Which meal a log with no stated slot assumes, by the hour. Overridable on
+ * every screen that logs.
+ *
+ * One definition. The tab bar, the dashboard and the scan screen each carried
+ * their own copy, and three copies of a set of hour boundaries is two chances
+ * for "+ at 4pm" to mean a snack on one screen and lunch on another.
+ */
+export function slotForNow(): MealSlot {
+  const hour = new Date().getHours();
+  if (hour < 11) return 'breakfast';
+  if (hour < 15) return 'lunch';
+  if (hour < 18) return 'snack';
+  return 'dinner';
+}
+
 export interface FoodSearchResult {
   id: string;
   source: string;

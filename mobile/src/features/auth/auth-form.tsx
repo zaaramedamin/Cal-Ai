@@ -183,7 +183,11 @@ export function AuthForm({
               value={password}
               onChangeText={setPassword}
               error={fieldErrors.password}
-              hint={requireConfirmation ? `At least ${PASSWORD_MIN_LENGTH} characters` : undefined}
+              hint={
+                requireConfirmation
+                  ? t('auth.useAtLeast', { count: PASSWORD_MIN_LENGTH })
+                  : undefined
+              }
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -219,7 +223,7 @@ export function AuthForm({
 
             {showForgotPassword && (
               <Link href="/forgot-password" style={styles.forgotLink}>
-                Forgot your password?
+                {t('auth.forgot')}
               </Link>
             )}
 
@@ -258,16 +262,24 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: space.xxl,
   },
-  top: { width: '100%' },
+  // Negative margins cancel the Screen wrapper's side padding, so the photo
+  // really is full bleed. It was inset 24pt from each edge with square corners,
+  // under a form sheet with rounded ones — a photo in a frame rather than the
+  // edge-to-edge hero the layout describes.
+  top: { marginHorizontal: -space.xl, marginTop: -space.lg },
   topPhoto: { width: '100%', height: 260 },
   // The sheet the form sits on, lifted over the photo's lower edge so the two
   // read as one surface rather than two stacked rectangles.
+  // Full width like the photo, with the Screen's own padding restored inside.
+  // The fields were indented twice — 24 from the Screen plus 16 here — which
+  // left them 40pt from each edge, narrower than every other form in the app.
   body: {
     marginTop: -28,
-    backgroundColor: color.paper,
+    marginHorizontal: -space.xl,
+    backgroundColor: color.canvas,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
-    paddingHorizontal: space.lg,
+    paddingHorizontal: space.xl,
     paddingTop: space.xl,
   },
   subtitle: {

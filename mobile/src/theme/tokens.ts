@@ -32,12 +32,17 @@ const palette = {
   /** Primary text. Deep obsidian navy. */
   ink: '#0F172A',
 
-  /** Modern Indigo/Violet Action Color. */
-  accent: '#6366F1',
+  /**
+   * Indigo, the action colour. `#4F46E5` rather than the lighter `#6366F1` it
+   * replaced: white on that one measured 4.47:1, just under the 4.5:1 WCAG AA
+   * floor for text the size of a button label, and the same hue as link text on
+   * white failed the same way. This one is 6.3:1 either way round.
+   */
+  accent: '#4F46E5',
   /** Rich Gradient Accent End */
-  accentGradientEnd: '#4F46E5',
+  accentGradientEnd: '#4338CA',
   /** Pressed and active state. */
-  accentDeep: '#4338CA',
+  accentDeep: '#3730A3',
 
   /** Protein. Rich Salmon/Coral Red. */
   protein: '#EF4444',
@@ -62,8 +67,26 @@ const palette = {
   positive: '#10B981',
   /** Warning / Check this. */
   warning: '#F59E0B',
-  /** Danger / Error. */
-  danger: '#EF4444',
+  /**
+   * Danger / Error. A deeper red than protein's on purpose: they were the same
+   * `#EF4444`, so an error message and a protein figure read as one thing, and
+   * white on it (the danger button) was 3.8:1.
+   */
+  danger: '#DC2626',
+
+  // ---- Text-safe hues -----------------------------------------------------
+  // The hues above are for fills, rings, bars and dots. As *text* most of them
+  // are unreadable — amber on white is 2.1:1, cyan 2.4:1, green 2.5:1 — so any
+  // coloured word or number uses the matching shade below instead. Each is
+  // 4.5:1 or better on white, on the canvas, and on its own tint.
+  proteinText: '#B91C1C',
+  carbsText: '#B45309',
+  fatText: '#1D4ED8',
+  waterText: '#0E7490',
+  flameText: '#C2410C',
+  positiveText: '#047857',
+  warningText: '#B45309',
+  dangerText: '#B91C1C',
 } as const;
 
 const INK_RGB = '15, 23, 42';
@@ -79,10 +102,20 @@ const tint = (hex: string, alpha: number): string => {
 export const color = {
   ...palette,
 
-  /** Secondary text: timestamps, units, helper copy. */
-  inkMuted: `rgba(${INK_RGB}, 0.60)`,
-  /** Tertiary text and disabled icons. */
+  /**
+   * Secondary text: timestamps, units, helper copy. 0.64 rather than 0.60 so it
+   * still clears 4.5:1 on the grey `wash` behind chips and legends, not only on
+   * white.
+   */
+  inkMuted: `rgba(${INK_RGB}, 0.64)`,
+  /**
+   * Disabled icons and decorative ticks only — 2.2:1, so **never for text** a
+   * person needs to read. Inactive tab labels were drawn in this and could not
+   * be read at arm's length.
+   */
   inkFaint: `rgba(${INK_RGB}, 0.35)`,
+  /** Text and icons on `accent` that are secondary to a label beside them. */
+  onDarkMuted: 'rgba(255, 255, 255, 0.85)',
   /** Hairline separators on white. */
   hairline: `rgba(${INK_RGB}, 0.08)`,
   /** Neutral pressed/selected wash and empty ring tracks. */
@@ -104,11 +137,13 @@ export const color = {
   dangerTint: tint(palette.danger, 0.09),
   flameTint: tint(palette.flame, 0.11),
 
-  // Aliases kept so older screens keep compiling while they are restyled.
-  clay: palette.accent,
-  clayDeep: palette.danger,
-  inkWash: `rgba(${INK_RGB}, 0.05)`,
-  paper: palette.canvas,
+  /** Dimmed backdrop behind a sheet or menu. */
+  scrim: `rgba(${INK_RGB}, 0.45)`,
+
+  // The aliases that lived here — `clay`, `clayDeep`, `inkWash`, `paper` —
+  // were kept "while older screens are restyled". That restyle is finished and
+  // they are gone: `clayDeep` in particular read as a pressed accent and
+  // painted things red.
 } as const;
 
 export const space = {

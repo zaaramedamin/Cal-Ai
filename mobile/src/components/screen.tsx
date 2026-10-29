@@ -37,7 +37,7 @@ export function Screen({ children }: ScreenProps) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: color.paper,
+    backgroundColor: color.canvas,
     paddingHorizontal: space.xl,
   },
 });

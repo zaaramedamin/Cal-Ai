@@ -24,13 +24,27 @@ import { text } from '@/theme/typography';
 /** The plotted range. Below and above this the marker simply pins to an end. */
 const MIN_BMI = 15;
 const MAX_BMI = 40;
+/** Obese has no upper bound; the bar simply ends here. */
+const MAX_BMI_BAND = MAX_BMI;
 
+/**
+ * The four WHO bands, in the app's own palette rather than a second set of
+ * flat-UI hexes. `upTo` is each band's upper bound, which is what places the
+ * colour stops: they used to sit at 0/33/66/100% of the bar, but on a 15–40
+ * scale the real boundaries fall at 14%, 40% and 60% — so a BMI of 26,
+ * "overweight", was drawn on green.
+ */
 const BANDS = [
-  { key: 'underweight', tint: '#4C9AFF' },
-  { key: 'healthy', tint: '#2ECC71' },
-  { key: 'overweight', tint: '#F5B041' },
-  { key: 'obese', tint: '#E74C3C' },
+  { key: 'underweight', upTo: 18.5, tint: color.fat, tintSoft: color.fatTint, ink: color.fatText },
+  { key: 'healthy', upTo: 25, tint: color.positive, tintSoft: color.positiveTint, ink: color.positiveText },
+  { key: 'overweight', upTo: 30, tint: color.warning, tintSoft: color.warningTint, ink: color.warningText },
+  { key: 'obese', upTo: MAX_BMI_BAND, tint: color.danger, tintSoft: color.dangerTint, ink: color.dangerText },
 ] as const;
+
+/** Where a BMI value falls along the bar, 0–1. */
+function along(bmi: number): number {
+  return Math.min(1, Math.max(0, (bmi - MIN_BMI) / (MAX_BMI - MIN_BMI)));
+}
 
 type Category = (typeof BANDS)[number]['key'];
 
@@ -38,7 +52,19 @@ export function BmiCard({ bmi, category }: { bmi: number; category: Category | s
   const t = useT();
   const band = BANDS.find((entry) => entry.key === category) ?? BANDS[1];
 
-  const position = Math.min(1, Math.max(0, (bmi - MIN_BMI) / (MAX_BMI - MIN_BMI)));
+  const position = along(bmi);
+
+  // Each band gets a solid run with a short blend either side of its boundary,
+  // so the colour under the marker is the colour of the category it names.
+  const BLEND = 0.02;
+  const stops = BANDS.flatMap((entry, index) => {
+    const start = index === 0 ? 0 : along(BANDS[index - 1].upTo) + BLEND;
+    const end = index === BANDS.length - 1 ? 1 : along(entry.upTo) - BLEND;
+    return [
+      { offset: start, color: entry.tint },
+      { offset: end, color: entry.tint },
+    ];
+  });
 
   return (
     <Card style={styles.card}>
@@ -47,8 +73,12 @@ export function BmiCard({ bmi, category }: { bmi: number; category: Category | s
       <View style={styles.readout}>
         <Text style={styles.value}>{bmi.toFixed(1)}</Text>
         <Text style={styles.lead}>{t('progress.yourWeightIs')}</Text>
-        <View style={[styles.pill, { backgroundColor: band.tint }]}>
-          <Text style={styles.pillText}>{t(`progress.bmi.${band.key}` as never)}</Text>
+        {/* Tinted pill with deep text. White on the bright band colours was
+            about 2:1 — the one word on this card that carries the verdict. */}
+        <View style={[styles.pill, { backgroundColor: band.tintSoft }]}>
+          <Text style={[styles.pillText, { color: band.ink }]}>
+            {t(`progress.bmi.${band.key}` as never)}
+          </Text>
         </View>
       </View>
 
@@ -56,10 +86,9 @@ export function BmiCard({ bmi, category }: { bmi: number; category: Category | s
         <Svg width="100%" height={10}>
           <Defs>
             <LinearGradient id="bmiScale" x1="0" y1="0" x2="1" y2="0">
-              <Stop offset="0" stopColor={BANDS[0].tint} />
-              <Stop offset="0.33" stopColor={BANDS[1].tint} />
-              <Stop offset="0.66" stopColor={BANDS[2].tint} />
-              <Stop offset="1" stopColor={BANDS[3].tint} />
+              {stops.map((stop, index) => (
+                <Stop key={index} offset={stop.offset} stopColor={stop.color} />
+              ))}
             </LinearGradient>
           </Defs>
           <Rect x="0" y="0" width="100%" height="10" rx="5" fill="url(#bmiScale)" />
@@ -90,7 +119,7 @@ const styles = StyleSheet.create({
   value: { ...text.numeric, fontSize: 34, lineHeight: 40 },
   lead: { ...text.bodyMuted },
   pill: { paddingHorizontal: space.md, paddingVertical: space.xs, borderRadius: radius.pill },
-  pillText: { ...text.label, fontSize: 12, color: color.onDark },
+  pillText: { ...text.label, fontSize: 12 },
 
   marker: {
     position: 'absolute',

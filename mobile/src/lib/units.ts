@@ -21,6 +21,22 @@ export const cmToInches = (cm: number): number => cm / CM_PER_INCH;
 export const inchesToCm = (inches: number): number => inches * CM_PER_INCH;
 
 /** "5ft, 6in" from a total inch count. */
+/**
+ * A number typed into a field, or null if it is not one.
+ *
+ * Accepts a comma as the decimal separator. On a phone set to French — this
+ * app's first market — the decimal keypad *has no dot*, only a comma, and
+ * `Number('72,5')` is NaN. Every field that used a bare `Number()` therefore
+ * refused any fractional weight or amount from exactly the users it was built
+ * for.
+ */
+export function parseDecimal(input: string): number | null {
+  const trimmed = input.trim();
+  if (trimmed === '') return null;
+  const value = Number(trimmed.replace(',', '.'));
+  return Number.isFinite(value) ? value : null;
+}
+
 export function formatFeetInches(totalInches: number): string {
   const whole = Math.round(totalInches);
   return `${Math.floor(whole / 12)}ft, ${whole % 12}in`;

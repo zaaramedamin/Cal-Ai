@@ -252,9 +252,9 @@ const styles = StyleSheet.create({
     marginTop: space.lg,
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: color.inkWash,
+    backgroundColor: color.dangerTint,
     borderLeftWidth: 3,
-    borderLeftColor: color.clayDeep,
+    borderLeftColor: color.danger,
   },
   formErrorText: { ...text.body, fontSize: 14 },
   actions: { marginTop: space.xl },
@@ -264,5 +264,5 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'center',
   },
-  footerLink: { ...text.label, color: color.clay },
+  footerLink: { ...text.label, color: color.accent },
 });

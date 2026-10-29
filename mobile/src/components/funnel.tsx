@@ -221,5 +221,5 @@ const styles = StyleSheet.create({
   choiceLabel: { ...text.label, fontSize: 16 },
   choiceDescription: { ...text.bodyMuted, fontSize: 13 },
   onDark: { color: color.onDark },
-  onDarkMuted: { color: 'rgba(255, 255, 255, 0.7)' },
+  onDarkMuted: { color: color.onDarkMuted },
 });

@@ -28,7 +28,6 @@ import { ProjectionChart } from '@/components/projection-chart';
 import { Screen } from '@/components/screen';
 import { useLanguage } from '@/i18n';
 import { HOME } from '@/routes';
-import { kgToLbs } from '@/lib/units';
 import { color, radius, space } from '@/theme/tokens';
 import { fontFamily, text } from '@/theme/typography';
 
@@ -151,9 +150,20 @@ export default function PlanScreen() {
             label={t('common.protein')}
             grams={targets.macros.protein_g}
             tint={color.protein}
+            ink={color.proteinText}
           />
-          <MacroCard label={t('common.carbs')} grams={targets.macros.carbs_g} tint={color.carbs} />
-          <MacroCard label={t('common.fat')} grams={targets.macros.fat_g} tint={color.fat} />
+          <MacroCard
+            label={t('common.carbs')}
+            grams={targets.macros.carbs_g}
+            tint={color.carbs}
+            ink={color.carbsText}
+          />
+          <MacroCard
+            label={t('common.fat')}
+            grams={targets.macros.fat_g}
+            tint={color.fat}
+            ink={color.fatText}
+          />
         </View>
 
         {targets.warnings.length > 0 && (
@@ -163,7 +173,7 @@ export default function PlanScreen() {
           <View style={styles.warnings}>
             {targets.warnings.map((warning) => (
               <View key={warning} style={styles.warningRow}>
-                <Ionicons name="alert-circle-outline" size={16} color={color.carbs} />
+                <Ionicons name="alert-circle-outline" size={16} color={color.warningText} />
                 <Text style={styles.warningText}>{warning}</Text>
               </View>
             ))}
@@ -197,11 +207,22 @@ export default function PlanScreen() {
   );
 }
 
-function MacroCard({ label, grams, tint }: { label: string; grams: number; tint: string }) {
+function MacroCard({
+  label,
+  grams,
+  tint,
+  ink,
+}: {
+  label: string;
+  grams: number;
+  tint: string;
+  /** The hue deep enough to read as text on white; see `color.carbsText`. */
+  ink: string;
+}) {
   return (
     <Card compact style={styles.macroCard}>
       <View style={[styles.macroDot, { backgroundColor: tint }]} />
-      <Text style={[styles.macroValue, { color: tint }]}>{Math.round(grams)}g</Text>
+      <Text style={[styles.macroValue, { color: ink }]}>{Math.round(grams)}g</Text>
       <Text style={styles.macroLabel}>{label}</Text>
     </Card>
   );
@@ -239,7 +260,9 @@ const styles = StyleSheet.create({
     letterSpacing: -0.6,
     color: color.ink,
   },
-  headlineAccent: { color: color.fat },
+  // The action colour, which is the brand's. It was the fat macro's blue — the
+  // one screen where a key number wore a macro's colour without being one.
+  headlineAccent: { color: color.accent },
 
   chartCard: { paddingTop: space.xl, paddingBottom: space.lg },
   disclaimer: { flexDirection: 'row', gap: space.sm, paddingHorizontal: space.xs },
@@ -268,7 +291,7 @@ const styles = StyleSheet.create({
     gap: space.sm,
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(239, 160, 54, 0.10)',
+    backgroundColor: color.warningTint,
   },
   warningText: { ...text.body, fontSize: 13, flex: 1, lineHeight: 18 },
 

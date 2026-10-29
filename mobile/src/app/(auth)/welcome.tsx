@@ -149,14 +149,14 @@ const styles = StyleSheet.create({
   // clear of the fold on a small phone. The sheet overlaps it, so the visible
   // portion is smaller than this number suggests.
   photo: { width: '100%', height: '62%' },
-  photoFallback: { backgroundColor: color.inkWash },
+  photoFallback: { backgroundColor: color.wash },
 
   sheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: color.paper,
+    backgroundColor: color.canvas,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     paddingHorizontal: space.lg,
@@ -174,8 +174,10 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
     marginBottom: space.md,
   },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: color.wash },
-  dotActive: { backgroundColor: color.ink, width: 20 },
+  // inkFaint, not wash: at 5% the inactive dots were a 1.05:1 smudge on the
+  // canvas, so the carousel never showed there was more than one slide.
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: color.inkFaint },
+  dotActive: { backgroundColor: color.accent, width: 20 },
 
   signIn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   signInLink: { ...text.label, color: color.accent },

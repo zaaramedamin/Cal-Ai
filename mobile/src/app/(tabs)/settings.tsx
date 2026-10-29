@@ -55,7 +55,15 @@ export default function SettingsScreen() {
     <Screen>
       <Text style={text.title}>{t('settings.title')}</Text>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        // The delete-account confirmation is a text field at the very bottom of
+        // this list. Without these the keyboard covered it, and the first tap on
+        // "Delete" only dismissed the keyboard rather than pressing the button.
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
         {data && (
           <Card>
             <Text style={text.overline}>{t('settings.dailyTargets')}</Text>
@@ -155,7 +163,14 @@ export default function SettingsScreen() {
 
         <SectionLabel>{t('settings.sectionAccountActions')}</SectionLabel>
         <Card style={styles.menuCard}>
-          <MenuRow icon="log-out-outline" label={t('settings.signOut')} hint={user?.email} destructive
+          {/* Not `destructive`. Signing out loses nothing and is undone by
+              signing in; painting it the same red as deleting the account
+              teaches people to ignore the red, which is the one thing the red
+              below must never be. */}
+          <MenuRow
+            icon="log-out-outline"
+            label={t('settings.signOut')}
+            hint={user?.email}
             onPress={() => void signOut()}
           />
         </Card>
@@ -476,9 +491,9 @@ const styles = StyleSheet.create({
     marginTop: space.md,
     padding: space.md,
     borderRadius: radius.sm,
-    backgroundColor: color.wash,
+    backgroundColor: color.warningTint,
     borderLeftWidth: 3,
-    borderLeftColor: color.carbs,
+    borderLeftColor: color.warning,
   },
   warningText: { ...text.body, fontSize: 13, lineHeight: 19 },
 
@@ -536,7 +551,7 @@ const styles = StyleSheet.create({
   deleteError: {
     padding: space.md,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(176, 74, 58, 0.10)',
+    backgroundColor: color.dangerTint,
   },
   deleteErrorText: { ...text.body, fontSize: 13 },
   menuRow: {
@@ -550,5 +565,5 @@ const styles = StyleSheet.create({
   menuRowPressed: { backgroundColor: color.wash },
   menuText: { flex: 1, gap: 1 },
   menuHint: { ...text.bodyMuted, fontSize: 12 },
-  destructiveLabel: { color: color.danger },
+  destructiveLabel: { color: color.dangerText },
 });

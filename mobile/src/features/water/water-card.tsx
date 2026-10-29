@@ -102,13 +102,23 @@ export function WaterCard({ day, onChange }: { day: WaterDay; onChange: (day: Wa
       <View style={styles.head}>
         <View style={styles.headLeft}>
           <View style={styles.iconCircle}>
-            <Ionicons name="water" size={16} color={color.water} />
+            <Ionicons name="water" size={16} color={color.waterText} />
           </View>
           <Text style={text.label}>{t('water.title')}</Text>
         </View>
 
         {day.entries.length > 0 && (
-          <Pressable onPress={() => void undoLast()} hitSlop={HIT_SLOP_MIN} disabled={busy}>
+          <Pressable
+            onPress={() => void undoLast()}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+            // A modest slop: the word is small, but a 44pt slop on every side
+            // reached down into the readout below it.
+            hitSlop={12}
+            style={styles.undoButton}
+          >
+            <Ionicons name="arrow-undo" size={14} color={color.waterText} />
             <Text style={styles.undo}>{t('water.undo')}</Text>
           </Pressable>
         )}
@@ -136,12 +146,14 @@ export function WaterCard({ day, onChange }: { day: WaterDay; onChange: (day: Wa
             key={option.ml}
             onPress={() => void add(option.ml)}
             disabled={busy}
-            hitSlop={HIT_SLOP_MIN}
+            // No hitSlop. The buttons are already 44pt tall and sit 8pt apart;
+            // a 44pt slop on each made neighbours overlap, so a tap near an edge
+            // could add 500 ml when you meant 250.
             accessibilityRole="button"
             accessibilityLabel={t('water.addLabel', { ml: option.ml })}
             style={({ pressed }) => [styles.add, pressed && styles.addPressed]}
           >
-            <Ionicons name={option.icon} size={18} color={color.water} />
+            <Ionicons name={option.icon} size={18} color={color.waterText} />
             <Text style={styles.addText}>+{option.ml}</Text>
           </Pressable>
         ))}
@@ -166,7 +178,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  undo: { ...text.bodyMuted, fontSize: 13, color: color.water, fontFamily: fontFamily.semiBold },
+  undoButton: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 32 },
+  // waterText, not water: the bright cyan is 2.4:1 as text.
+  undo: { ...text.bodyMuted, fontSize: 13, color: color.waterText, fontFamily: fontFamily.semiBold },
 
   readout: {
     flexDirection: 'row',
@@ -198,6 +212,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.xs,
+    minHeight: HIT_SLOP_MIN,
     paddingVertical: space.md,
     paddingHorizontal: space.sm,
     borderRadius: radius.pill,

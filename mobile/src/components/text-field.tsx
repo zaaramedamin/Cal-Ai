@@ -41,10 +41,12 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
           style,
         ]}
         placeholderTextColor={color.inkFaint}
-        // Announces the error to a screen reader instead of relying on the red
-        // border, which conveys nothing to someone who cannot see it.
         accessibilityLabel={label}
-        accessibilityHint={hint}
+        // The error goes in the hint, so a screen reader announces it on focus
+        // instead of relying on the red border, which conveys nothing to
+        // someone who cannot see it. It used to pass only `hint`, and the
+        // comment claimed the error was announced when it was not.
+        accessibilityHint={error ?? hint}
         aria-invalid={invalid}
         {...inputProps}
         onFocus={(event) => {
@@ -75,10 +77,11 @@ const styles = StyleSheet.create({
     ...text.overline,
     color: color.inkMuted,
   },
+  // Only the colour changes on focus. The width used to go from 1 to 1.5 as
+  // well, which pushed the text half a point sideways and grew the field by a
+  // point on every tap — a small jolt, felt every time a form is used.
   inputFocused: {
     borderColor: color.accent,
-    borderWidth: 1.5,
-    backgroundColor: color.surface,
   },
   input: {
     ...text.body,
@@ -86,17 +89,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
     backgroundColor: color.surface,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: color.hairline,
     borderRadius: radius.md,
   },
   inputInvalid: {
-    borderColor: color.clayDeep,
+    borderColor: color.danger,
   },
   error: {
     ...text.label,
     fontSize: 13,
-    color: color.clayDeep,
+    color: color.dangerText,
   },
   hint: {
     ...text.bodyMuted,
