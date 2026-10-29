@@ -278,9 +278,9 @@ cd mobile
 npm install -g eas-cli
 eas login
 eas init
-eas env:create --environment preview --name EXPO_PUBLIC_API_URL --value https://<api-host> --visibility plaintext
-eas env:create --environment preview --name EXPO_PUBLIC_SUPABASE_URL --value https://<project-ref>.supabase.co --visibility plaintext
-eas env:create --environment preview --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <anon key> --visibility plaintext
+eas env:set --environment preview --name EXPO_PUBLIC_API_URL --value https://<api-host> --visibility plaintext
+eas env:set --environment preview --name EXPO_PUBLIC_SUPABASE_URL --value https://<project-ref>.supabase.co --visibility plaintext
+eas env:set --environment preview --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <anon key> --visibility plaintext
 eas build --platform android --profile preview
 ```
 
