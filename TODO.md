@@ -1,9 +1,9 @@
 # CalAi — what is left to do
 
-Rewritten 3 August, updated 5 August 2026. Every number below was checked
-against the code or a live query, not recalled.
+Rewritten 3 August, updated 5 August and 26 September 2026. Every number below
+was checked against the code or a live query, not recalled.
 
-**Where the app stands:** 663 backend tests, `ruff` clean, `tsc` clean,
+**Where the app stands:** 674 backend tests (≈5 minutes — see Known thin spots), `ruff` clean, `tsc` clean,
 `alembic check` clean, the Expo bundle builds. One Postgres (Supabase) plus Redis
 for rate-limit counters. **410 foods**, of which 189 are Tunisian (INNTA) and 35
 are curated with photographs; 176 portions. 5 accounts, 23 diary entries — so it
@@ -12,6 +12,71 @@ is being used, lightly, by its author.
 **What it is:** a calorie tracker for **Tunisia first**, then Algeria, Morocco and
 Egypt. That is the sentence everything below now has to serve, and it is the one
 thing the old list never said.
+
+---
+
+## ✅ Fixed 26 September
+
+- **The hand-built auth is shut while Supabase is configured.** Every
+  `/api/v1/auth/*` route answers 404 and a `SECRET_KEY`-signed token is refused.
+  `/register` was a live lockout: one POST claimed a stranger's address without
+  confirming it, and their own Supabase sign-up was refused from then on.
+- **Signing in no longer writes on every request.** `_provision` INSERTed and
+  COMMITted each time — three round trips, ~250 ms against eu-north-1 (measured
+  84 ms each) — before the endpoint did any work. It now reads first and writes
+  only for a new account. The home screen sends six requests per visit.
+- **The embedding search experiment is stashed, not merged** (`git stash list`).
+  `text-embedding-004` answers 404, so it fell back silently to a character hash
+  with no meaning, made one sequential call to Google per unseen food name, sent
+  the key in the URL, re-sorted results by that score instead of the curated-first
+  tier, and made the test suite call Google for real (4.5× slower).
+- **The seven bundled photos went from 5.7 MB to 1.3 MB.** Same 1024 px, JPEG
+  quality 82; the previous files were saved near-lossless. All now under the
+  300 KB that `assets/photos/README.md` asks for.
+- **The 503 message names Supabase**, not only `docker compose up -d`.
+
+---
+
+## ✅ UI audit, 27 September
+
+Every screen and shared component read; `tsc` clean and a production Android
+bundle built afterwards. **Not yet looked at on a device** — the list under
+"Check on the phone" is what to watch.
+
+- **Contrast.** Accent `#6366F1` → `#4F46E5` (white on it 4.47 → 6.3:1). New
+  `*Text` tokens for coloured words: carbs-on-carbs-tint was 1.9:1. Inactive
+  tab labels and week letters moved off `inkFaint` (2.2:1). Danger split from
+  protein's red. Legacy `clay`/`clayDeep`/`inkWash`/`paper` aliases deleted.
+- **Hard-coded English.** Scan review (nearly all of it), macro tiles
+  ("left"/"over"), "Loading…", servings, the partial-nutrients note, "Forgot
+  your password?", the password hint, the search footnote, six a11y labels.
+- **French decimals.** Weight, food amount and scan grams used `Number()`, so
+  "72,5" from a French keypad was refused. `parseDecimal` in `lib/units.ts`.
+- **Real bugs.** Scan logged to today whatever day was open. Scan's pinned
+  footer was absolutely positioned — edge to edge, in the home-indicator area.
+  A failed multi-item log threw the scan away. The + button's hitSlop stole
+  taps from the Profile tab; water +ml buttons overlapped. The weekly target
+  line was drawn against the wrong height. BMI gradient stops were at 33/66%
+  instead of the real band edges, so "overweight" sat on green. Projection
+  chart dots were half-clipped. Catalogue sheet ignored the home-indicator
+  inset. Food source said "innta"/"ciqual" raw. Text fields jumped on focus.
+- **Improvements.** Pull to refresh and a Retry button on Home and Progress.
+  Search keeps results while typing instead of flashing them away. Food
+  screen: back button, Log button pinned. Ruler picker operable by
+  VoiceOver/TalkBack. Metric first in unit toggles. Nothing under 11px.
+
+### Check on the phone
+
+The sign-in hero (now full bleed), the scan review footer, the Progress week
+bars, and the BMI card are the four layouts changed most by reasoning alone.
+
+### UI still open
+
+- Deleting a diary entry is long-press only, with nothing on screen saying so.
+- Settings renders nothing where the targets card goes until the profile loads.
+- Numbers format by *device* locale, not the app's language ("1.5 L" in French).
+- The + menu does not close on Android's back button.
+- `@expo-google-fonts/fraunces` is a dependency nothing imports.
 
 ---
 
@@ -159,6 +224,8 @@ Ordered by what would hurt most to leave.
 
 ### One line, real consequence
 
+- **There is no git remote.** The only copy of this project, history included,
+  is one laptop disk. A private GitHub repository is one command.
 - **`REDIS_URL` is not set.** The shared rate limiter exists and is not switched
   on; counters are per-process and nothing says so at a glance.
 - **Email confirmation is off in Supabase.** Anyone can register on an address
@@ -171,8 +238,18 @@ Ordered by what would hurt most to leave.
   translated strings and every screen ride on `tsc` alone. Add `jest-expo`
   deliberately — do **not** run `expo lint`, which previously bootstrapped an
   unwanted ESLint config into this project.
-- **Password reset does not work for a real user.** `services/email.py` logs the
-  link instead of sending it. Nobody can recover an account.
+- **Email is not production-ready.** Supabase sends the reset and confirmation
+  mail now, not `services/email.py` — but through its built-in mailer, which is
+  for trying things out and heavily rate limited. Custom SMTP (Resend, Postmark)
+  in the dashboard, then turn email confirmation on.
+- **Delete the hand-built auth.** It is shut in production but still the way
+  ~25 test files sign in. Move them onto Supabase-style tokens — the fake-JWKS
+  fixture in `test_supabase_login.py` is most of the work — then delete
+  `api/v1/auth.py`, the HS256 half of `core/security.py` and `get_current_user`'s
+  fallback, and drop `refresh_tokens` and `password_reset_tokens` in a migration.
+- **Typo-tolerant search.** "tabona" should find tabouna. The right tool is
+  Postgres's `pg_trgm` — a migration and a GIN index, no network — not the
+  stashed embedding experiment. Keep ranking by `SEARCH_TIER` first.
 - **No builds, no deployment.** Expo Go on SDK 54 only, so nobody outside this
   machine has run the app. `mobile/AGENTS.md` forbids upgrading Expo/React Native
   until this changes.
@@ -190,14 +267,20 @@ Ordered by what would hurt most to leave.
   There is no browser in the test suite.
 - `FoodThumb`'s image-error fallback has never run.
 - Runtime language switching is wired and unverified.
-- No written key-rotation procedure for `SECRET_KEY`.
 - The README's phase table predates the catalogue, meals, photos, the pace
   picker, i18n, moderation and reporting.
+- The test suite takes ~5 minutes; the README's 21 seconds is long gone. Run
+  `pytest --durations=20` before guessing why — a test reaching the network
+  with the real keys in `.env` is the first suspect, as it was for embeddings.
+- The last two commits bundle 170 files under one generic message each, which
+  makes `git bisect` and review useless across them. Back to one change per
+  commit.
 
 ---
 
 ## Suggested order
 
+0. **A git remote.** Everything below is worth less while it exists on one disk.
 1. **The 9 flagged foods**, in `/admin` with the INNTA table open. Fifteen
    minutes, and they are wrong numbers sitting in a live database.
 2. **The 8 serving sizes**, with a kitchen scale. Nobody logs 100 g of tabouna.

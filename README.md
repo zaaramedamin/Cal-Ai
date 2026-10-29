@@ -1,132 +1,137 @@
 # CalAi
 
-A calorie and macronutrient tracking app. Set your body stats and a goal, get evidence-based daily
-calorie and macro targets, then log what you eat against them.
+A calorie and macronutrient tracker built for Tunisia first, with Algeria, Morocco and Egypt to follow.
+The user enters body measurements and a goal, receives daily calorie and macro targets, and logs meals
+against them. Foods can be searched, built from catalogue ingredients in real units, or identified from a
+photograph.
 
-**Status: phases 0–5 shipped, plus AI photo scanning.** Auth, onboarding and targets, USDA search,
-the diary, recipes, meal photo scanning, quick-add and meal suggestions all work end to end.
-Remaining phases are listed at the bottom.
+The project is a working prototype: a FastAPI backend, a PostgreSQL database hosted on Supabase, and a
+React Native (Expo) mobile client.
 
----
+## Contents
 
-## Ground rule: nutrition data is never invented
+1. [Features](#features)
+2. [Architecture](#architecture)
+3. [Nutrition data integrity](#nutrition-data-integrity)
+4. [Repository layout](#repository-layout)
+5. [Running locally](#running-locally)
+6. [Testing](#testing)
+7. [Deployment](#deployment)
+8. [Design decisions](#design-decisions)
+9. [Status and known limitations](#status-and-known-limitations)
 
-No nutrition value in this app is estimated, guessed, or hardcoded. Every food comes from
-[USDA FoodData Central](https://fdc.nal.usda.gov/) or [Open Food Facts](https://world.openfoodfacts.org/),
-and every stored row keeps its `source` and `source_id` so any number on screen can be traced back
-to its origin. Where a source genuinely does not report a nutrient, the app shows `—`, never `0`.
+## Features
 
-**This rule is why the AI photo scanner is built the way it is.** Asking a vision model "how many
-calories is this?" would break it on the first request. So the model is never asked. It answers only
-*which foods are on the plate* and *roughly how many grams of each* — its output schema has no field
-for a calorie — and those names are then matched against the USDA-backed database, which supplies
-every number. The user confirms the portions before anything is logged. The AI proposes, USDA
-prices, the user decides.
+- **Accounts.** Sign-up, sign-in and password reset through Supabase Auth.
+- **Onboarding and targets.** Daily calories and macros derived from age, sex, height, weight, activity
+  level, goal and chosen pace (Mifflin-St Jeor BMR, activity multiplier, goal adjustment).
+- **Food search.** Tunisian foods first (INNTA composition table), then the curated catalogue, then
+  Ciqual, USDA FoodData Central and Open Food Facts. Search results are ranked in that order.
+- **Diary.** Entries are logged to meal slots with a daily summary, macro progress and weekly view.
+- **Catalogue and meals.** Ingredients in natural units (litres of milk, eggs by the egg) with photographs,
+  and saved meals composed from them.
+- **Recipes.** Custom recipes with live nutrition totals.
+- **Photo scanning.** A meal photograph is analysed to propose foods and portions, which the user reviews
+  before anything is logged.
+- **Progress.** Weight history, BMI, a projection toward the goal, and water tracking.
+- **Moderation.** User-submitted foods and reports against existing foods are decided by an administrator
+  through a web console served at `/admin`.
+- **Languages.** French and English, selected from the device language.
 
----
+## Architecture
 
-## Stack
-
-| Layer | Choice |
+| Layer | Technology |
 |---|---|
-| Mobile | Expo SDK 54 (React Native 0.81, React 19.1), TypeScript strict, expo-router |
-| Backend | FastAPI, Python 3.13, SQLAlchemy 2.0 async, Pydantic v2 |
-| Database | PostgreSQL 16 via Docker Compose — one database, everything in it |
-| Migrations | Alembic, from the very first table |
+| Mobile client | Expo SDK 54, React Native 0.81, React 19, TypeScript (strict), expo-router |
+| API | FastAPI, Python 3.13, SQLAlchemy 2.0 (async), Pydantic v2 |
+| Database | PostgreSQL 16 on Supabase; schema managed with Alembic |
+| Authentication | Supabase Auth; the API verifies ES256 tokens against the project's published keys |
+| External data | USDA FoodData Central, Open Food Facts, Google Gemini (photo and text identification) |
+| Rate limiting | Per-IP and per-account counters, in memory or in Redis when `REDIS_URL` is set |
 
----
+The mobile client never calls the data providers directly. All requests go through the API, which caches
+results in Postgres, keeps provider keys out of the app bundle and stays within provider rate limits.
 
-## Setup from zero
+## Nutrition data integrity
 
-### 1. Prerequisites
+No nutrition value in the application is estimated, generated or hardcoded. Every food row is imported
+from a published source and keeps its `source` and `source_id`, so any figure on screen can be traced to
+its origin. A nutrient a source does not report is stored as `NULL` and displayed as an em dash, never
+as zero.
 
-On a machine with nothing installed (Windows):
+This constraint shapes the photo scanner. The vision model is asked only which foods appear on the plate
+and roughly how many grams of each; its response schema has no field for calories. The names are matched
+against the food database, which supplies every number, and the user confirms the portions before the
+entry is saved.
 
-```powershell
-winget install OpenJS.NodeJS.LTS
-winget install Python.Python.3.13
-winget install Docker.DockerDesktop
+## Repository layout
+
+```
+calai/
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/          route handlers
+│   │   ├── core/            settings, dependencies, security, rate limiting
+│   │   ├── db/              engine, session handling, ORM models
+│   │   ├── nutrition/       target and macro calculations
+│   │   ├── services/        USDA, Open Food Facts, Gemini, catalogue, food import
+│   │   ├── schemas/         Pydantic request and response models
+│   │   ├── admin/           single-page moderation console
+│   │   └── cli.py           data import and maintenance commands
+│   ├── alembic/versions/    database migrations
+│   └── tests/
+├── mobile/
+│   └── src/
+│       ├── app/             expo-router screens
+│       ├── api/             HTTP client and endpoint modules
+│       ├── components/      shared UI components
+│       ├── features/        feature-specific components
+│       ├── i18n/            French and English strings
+│       └── theme/           design tokens
+├── List of Foods/           combined food-composition dataset (INNTA, Ciqual, USDA)
+├── docker-compose.yml       local Postgres and Redis
+└── .env.example             every environment variable, documented
 ```
 
-Docker Desktop needs virtualization enabled. If `wsl --status` says WSL is not installed:
+## Running locally
 
-```powershell
-wsl --install --no-distribution     # elevated; requires a reboot
-```
+### Prerequisites
 
-**Then turn off the Python Store aliases**: Settings → Apps → Advanced app settings → App execution
-aliases → toggle off `python.exe` and `python3.exe`. Windows ships a 0-byte stub at those names that
-shadows the real interpreter, so `python` silently opens the Microsoft Store instead of running
-anything. This costs everyone an hour exactly once.
+- Node.js 20 or later
+- Python 3.13
+- Docker Desktop (used for the local test database)
+- A Supabase project (free tier is sufficient) for the database and authentication
+- The Expo Go app on a phone, on the same Wi-Fi network as the computer
 
-Verify in a **new** terminal: `node -v`, `python --version`, `docker --version`.
-
-### 2. Environment file
+### 1. Configuration
 
 ```powershell
 Copy-Item .env.example .env
-```
-
-Then generate a real secret and paste it in as `SECRET_KEY`:
-
-```powershell
 python -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-`.env` is gitignored. `.env.example` is committed and documents every variable — it must never
-contain a real secret.
+Paste the generated value into `.env` as `SECRET_KEY`, then set:
 
-**Optional — AI meal photo scanning.** Leave `GEMINI_API_KEY` blank and everything else works; the
-scan screen simply reports that the feature is switched off. To enable it, get a free key from
-[Google AI Studio](https://aistudio.google.com/apikey) (no credit card, roughly 250 scans a day) and
-paste it in:
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | Supabase session pooler string, using the `postgresql+asyncpg://` scheme |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Project Settings, API |
+| `USDA_API_KEY` | Free key from fdc.nal.usda.gov (the default `DEMO_KEY` is heavily limited) |
+| `GEMINI_API_KEY` | Optional. Without it the photo-scan endpoint reports that the feature is disabled |
+
+The mobile app needs the same Supabase values. Create `mobile/.env`:
 
 ```
-GEMINI_API_KEY=AIza...
+EXPO_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=<anon key>
 ```
 
-### 3. Database
+The anon key is designed to be public. The database password and `SECRET_KEY` must never appear in
+`mobile/.env`.
 
-```powershell
-docker compose up -d
-docker compose ps          # wait for both to read "healthy"
-```
+### 2. Database
 
-Two containers, and only the first is required.
-
-**Postgres** holds everything — accounts, the diary, weights, recipes, the
-curated food catalogue, saved meals and the catalogue photos. It is bound to
-127.0.0.1, because the phone talks to FastAPI and never to a database.
-
-**Redis** holds rate-limit counters, and nothing else. Optional: leave
-`REDIS_URL` unset and the limiter counts in the memory of one process instead,
-which is correct for one worker and wrong for any deployment running more than
-one. It has no volume on purpose — everything in it is a window measured in
-minutes, so losing it on a restart costs nothing.
-
-The catalogue and meals lived in a second MongoDB container until July 2026. They
-are ordinary tables now, which is worth a sentence because it removed a whole
-class of problem: a diary entry can hold a real foreign key to the food it
-records, so `ON DELETE RESTRICT` stops a saved meal ever losing an ingredient and
-quietly under-reporting its calories.
-
-### 3b. Seed the food catalogue
-
-The catalogue is a hand-picked list of foods with real units (litres for milk,
-eggs by the egg) whose **numbers come from USDA**, fetched once and stored:
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe -m app.cli seed-catalogue
-```
-
-**This needs a real `USDA_API_KEY`.** `DEMO_KEY` allows 30 requests an hour and
-the catalogue is longer than that, so seeding will stop partway with a message
-saying so. The seeder is resumable — run it again and it fills in what is
-missing — but a free key from
-<https://fdc.nal.usda.gov/api-key-signup.html> does it in one pass.
-
-### 4. Backend
+Apply the migrations to the configured database:
 
 ```powershell
 cd backend
@@ -134,16 +139,37 @@ python -m venv .venv
 .\.venv\Scripts\activate
 pip install -e ".[dev]"
 alembic upgrade head
+```
+
+To populate an empty database with food data:
+
+```powershell
+python -m app.cli seed-catalogue
+python -m app.cli import-foods "..\List of Foods\all_foods_deduplicated.json" --only INNTA
+python -m app.cli apply-portions
+```
+
+`seed-catalogue` needs a real `USDA_API_KEY`. The import commands write to whatever `DATABASE_URL`
+points at, so check it first.
+
+Note on Supabase connection strings: use the **session pooler** (port 5432, user `postgres.<ref>`). The
+direct connection is IPv6-only on the free tier, and the transaction pooler (port 6543) is incompatible
+with asyncpg's prepared statements.
+
+### 3. Start the API
+
+```powershell
+cd backend
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Check it: <http://localhost:8000/api/v1/health> should return
-`{"status":"ok","version":"0.1.0","db":"ok"}`, and <http://localhost:8000/docs> has the interactive
-API browser.
+Check <http://localhost:8000/api/v1/health>; it should report `"db": "ok"`. Interactive API documentation
+is at <http://localhost:8000/docs> in development, and the moderation console is at
+<http://localhost:8000/admin> for accounts flagged `is_admin`.
 
-### 5. Mobile
+The server must bind `0.0.0.0`. The default `127.0.0.1` is unreachable from a phone.
 
-In a second terminal:
+### 4. Start the mobile app
 
 ```powershell
 cd mobile
@@ -151,277 +177,160 @@ npm install
 npx expo start
 ```
 
-Install **Expo Go** on your phone, make sure it is on the same Wi-Fi as your computer, and scan the
-QR code.
+Scan the QR code with Expo Go. The app derives the API address from the host that served the bundle and
+uses port 8000, so it follows the computer's address if the network changes.
 
----
+## Testing
 
-### If PowerShell refuses to run scripts
-
-Windows blocks script execution by default, so `Activate.ps1` and `npx` both fail with
-*"running scripts is disabled on this system"*. Fix it once — no admin rights needed, since
-`-Scope CurrentUser` only touches your own account:
+The test suite runs against a local Postgres container and refuses to run against any other host, because
+its fixtures create and truncate tables.
 
 ```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+docker compose up -d
+docker compose ps                      # wait until both services report "healthy"
 ```
 
-`RemoteSigned` still blocks unsigned scripts downloaded from the internet; it only trusts local
-ones. It is the usual setting on a Windows development machine.
-
-If you would rather change nothing, both tools have a form that sidesteps PowerShell entirely —
-`npx.cmd expo start` runs as a batch file, and calling the interpreter directly does exactly what
-activation does, since activating a virtualenv only prepends `.venv\Scripts` to `PATH`:
+`TEST_DATABASE_URL` in `.env` must point at the container (see `.env.example`). Then:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Backend: tests and lint
+cd backend
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m alembic check     # models and migrations agree
+
+# Mobile: strict type check
+cd ..\mobile
+npx tsc --noEmit
 ```
 
----
+The full backend suite takes several minutes. For a quicker check, run a single file, for example
+`pytest tests/test_supabase_login.py`.
 
-## The three things that will break on Windows
+### Troubleshooting on Windows
 
-All of these produce a "cannot reach the backend" error, or an app that never finishes loading,
-with no obvious cause. The app's error screen names the first two, and here they are in full.
+- **The phone cannot reach the API or load the bundle.** With WSL or Hyper-V installed, Expo may advertise
+  a virtual adapter's address. Pin the Wi-Fi address (from `ipconfig`) and restart with a clean cache:
 
-### Expo picks the wrong IP when WSL or Hyper-V is installed
+  ```powershell
+  $env:REACT_NATIVE_PACKAGER_HOSTNAME = "192.168.1.124"
+  npx expo start -c
+  ```
 
-`ipconfig` on this machine lists three IPv4 addresses:
+- **The API is reachable from the PC but not the phone.** Allow inbound port 8000 on the private profile,
+  from an elevated PowerShell:
 
-```
-192.168.1.124   Wi-Fi          <- the only one the phone can reach
-172.21.80.1     vEthernet (WSL)
-172.17.96.1     vEthernet (Default Switch)
-```
+  ```powershell
+  New-NetFirewallRule -DisplayName "CalAi backend (8000)" -Direction Inbound `
+    -LocalPort 8000 -Protocol TCP -Action Allow -Profile Private
+  ```
 
-Expo picks one of them to advertise to the phone, and it does not always pick the Wi-Fi one. When
-it picks a virtual adapter the failure is total and confusing: the phone cannot fetch the JS
-bundle, **and** it cannot reach the API either — `resolveApiBaseUrl()` in `mobile/src/api/client.ts`
-derives the backend host from the same address Expo served the bundle from. One wrong guess breaks
-both, and the app simply never starts.
+- **Database connections are slow.** Use `127.0.0.1` rather than `localhost` in local URLs. On Windows,
+  `localhost` resolves to IPv6 first and every new connection waits for that attempt to fail
+  (measured: 2123 ms against 84 ms).
+- **PowerShell blocks scripts.** Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+- **`python` opens the Microsoft Store.** Disable the `python.exe` app execution alias in Settings, Apps,
+  Advanced app settings.
+- **A free Supabase project looks like a database outage.** Projects pause after a week without traffic.
+  Restore it from the dashboard.
 
-Pin it explicitly:
+## Deployment
 
-```powershell
-$env:REACT_NATIVE_PACKAGER_HOSTNAME = "192.168.1.124"   # your Wi-Fi IP, from ipconfig
-npx expo start -c
-```
+The database and authentication already run on Supabase, so deployment consists of hosting the API and
+building the mobile client against it.
 
-Check it worked — the printed URL and the QR code should both show the Wi-Fi address, not a
-`172.x` one.
+### API
 
-### uvicorn must bind `0.0.0.0`
+Any host that runs a Python 3.13 web process works. With a managed host such as Render:
 
-```powershell
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000   # correct
-uvicorn app.main:app --reload                              # phone can NEVER reach this
-```
-
-The default binds `127.0.0.1`, which accepts connections originating from that machine only. Your
-phone's request is refused before it reaches any application code.
-
-Related: `localhost` typed on a phone means *the phone*, which is running no server. The app never
-hardcodes an address — it reads the host Expo served the bundle from and targets port 8000 on the
-same machine, so it keeps working when your router hands out a different IP.
-
-### Use `127.0.0.1`, never `localhost`, in `DATABASE_URL`
-
-`localhost` resolves to the IPv6 address `::1` before IPv4, but Docker Compose
-publishes Postgres on IPv4 only. Every new connection therefore waits for the IPv6
-attempt to fail before retrying — and nothing reports an error, so it just looks like
-a slow database.
-
-Measured on this project:
-
-| Host | Time per connection |
+| Setting | Value |
 |---|---|
-| `localhost` | 2123 ms |
-| `127.0.0.1` | 84 ms |
+| Root directory | `backend` |
+| Build command | `pip install -e .` |
+| Start command | `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Health check path | `/api/v1/health` |
+| Python version | 3.13 (for example `PYTHON_VERSION=3.13.1`) |
 
-It took the backend test suite from **4m 48s to 21s**. Connection pooling hides it in
-normal development, which is exactly why it survives unnoticed until something opens
-connections in a loop.
+Environment variables:
 
-### Windows Firewall blocks inbound 8000
+| Variable | Notes |
+|---|---|
+| `ENVIRONMENT` | `production`. Disables `/docs` and restricts CORS |
+| `DATABASE_URL` | Supabase session pooler string |
+| `SECRET_KEY` | A fresh random value of at least 32 characters |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Same as local |
+| `USDA_API_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL` | Provider credentials |
+| `OFF_USER_AGENT` | Descriptive agent with a contact address, required by Open Food Facts |
+| `REDIS_URL` | Optional. Required for correct rate limiting with more than one worker |
+| `TRUST_PROXY_HEADERS` | `true` only behind a proxy that overwrites `X-Forwarded-For` |
 
-Run once, in an **elevated** PowerShell:
+Free-tier hosts stop idle services, so the first request after a pause is slow.
 
-```powershell
-New-NetFirewallRule -DisplayName "CalAi backend (8000)" -Direction Inbound `
-  -LocalPort 8000 -Protocol TCP -Action Allow -Profile Private
-```
+### Mobile client
 
-`-Profile Private` is deliberate: the port opens on your home network, not on public Wi-Fi.
-
----
-
-## Layout
-
-```
-calai/
-├─ docker-compose.yml       Postgres 16, named volume, healthcheck
-├─ .env.example             every variable, documented, no real values
-├─ backend/
-│  ├─ app/
-│  │  ├─ main.py            app factory, CORS, router mounting
-│  │  ├─ core/config.py     the only place environment variables are read
-│  │  ├─ db/                async engine, session-per-request, ORM base
-│  │  ├─ api/v1/            versioned routes
-│  │  └─ schemas/           Pydantic request/response models
-│  └─ alembic/versions/     migrations — the schema's only source of truth
-└─ mobile/
-   └─ src/
-      ├─ app/               expo-router file-based routes
-      ├─ api/               HTTP client, base URL resolution, error taxonomy
-      ├─ theme/             design tokens and type scale
-      └─ components/        UI primitives
-```
-
-`src/app/` holds routes only; real logic lives beside it in `src/`. That keeps the router tree
-readable as a sitemap rather than a dumping ground.
-
----
-
-## Verifying Phase 0
+Release builds are produced with Expo Application Services (EAS). Give the app a unique Android package
+name in `mobile/app.config.ts` (`android.package`), then:
 
 ```powershell
-cd backend;  ruff check .              # lint clean
-cd ..\mobile; npx tsc --noEmit         # strict-mode typecheck clean
+cd mobile
+npm install -g eas-cli
+eas login
+eas build:configure
 ```
 
-Then the real test — the negative case matters as much as the positive one:
+Set the three public build variables for the build profile (in `eas.json` under `env`, or as EAS
+environment variables): `EXPO_PUBLIC_API_URL` (the deployed API origin, without a trailing slash),
+`EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`. Then build an installable Android package:
 
-1. With everything running, the phone shows the round-trip time, `Backend v0.1.0`, and
-   `Database Connected`.
-2. Run `docker compose stop` and tap **Check again**. The screen must show *Postgres isn't
-   reachable* with the command to fix it — the API is still up, so this is a partial failure and it
-   is reported as one, not as a generic error.
-3. Stop uvicorn and tap **Check again**. The screen must show *Cannot reach the backend* with the
-   numbered checklist. Not a crash, and not a spinner that never ends.
+```powershell
+eas build --platform android --profile preview
+```
 
-If step 2 and 3 look identical, the error handling is not actually doing its job.
+with `"android": { "buildType": "apk" }` in the `preview` profile. iOS distribution requires an Apple
+Developer account.
 
----
+For a demonstration without a native build, run `npx expo start` with `EXPO_PUBLIC_API_URL` set to the
+deployed API and open the project in Expo Go.
 
-## Notable decisions
+## Design decisions
 
-- **FastAPI over Express + TypeScript.** Pydantic v2 gives runtime validation and an OpenAPI schema
-  from one declaration, and the nutrition maths wants Python's testing story. The real cost is
-  losing one language across the stack — recovered by generating the mobile app's TypeScript client
-  from the backend's OpenAPI schema, so a changed response shape becomes a compile error.
-- **The backend proxies USDA and Open Food Facts; the app never calls them.** Open Food Facts allows
-  15 requests/minute per IP — a handful of users typing in a search box would exhaust that and earn
-  an IP ban. Caching in our own Postgres turns thousands of searches into a few upstream calls, and
-  keeps the API key out of a mobile bundle, where nothing is secret.
-- **The photo scanner splits identification from nutrition.** Gemini gets the photo and returns food
-  names and gram estimates under a response schema with no nutrition field in it; the calories come
-  from the USDA cache afterwards. The failure mode this buys is a survivable one — a hallucinating
-  model names the wrong food, which the user sees on the review screen and corrects, instead of
-  silently inventing a number that looks as authoritative as a real one. Photos are held in memory
-  for the request and never stored.
-- **The diary snapshots nutrient values at log time** rather than recalculating from the food row.
-  USDA revises values and users edit recipes; last Tuesday's lunch must not change retroactively.
-  Think invoice line item, not live price lookup.
-- **A missing nutrient is `NULL`, never `0`, all the way to the screen.** If USDA doesn't report
-  fibre, the app shows `—`. Day totals flag which nutrients any entry failed to report, because a
-  total summed over holes looks authoritative and is quietly too low.
-- **Targets and recipe nutrition are computed on read, never stored.** Both are pure functions of
-  their inputs, so a stored copy goes stale the moment an input changes — and a stale calorie
-  target is worse than none.
-- **"Today" is the user's local day, never UTC.** `diary_entries.local_date` is computed server-side
-  from the profile's IANA timezone. The client never dictates the date.
-- **Passwords use argon2id; refresh tokens use SHA-256.** Different hashes for different inputs.
-  A password is low-entropy and reused across sites, so it needs a deliberately slow, memory-hard
-  hash. A refresh token is 256 bits we generated ourselves — nobody guesses it, so a slow hash
-  would only add latency to every refresh.
-- **Refresh tokens are opaque, not JWTs.** A JWT validates itself, which is exactly wrong here:
-  every refresh must hit the database so revocation takes effect immediately. That is what makes
-  logout mean something.
-- **Rotation with theft detection, but only where theft is actually implied.** Replaying a *spent*
-  token means two parties hold it, so every session is revoked. Replaying a *logged-out* token is
-  almost always a stale client, and treating that as theft would make signing out on one device
-  silently sign you out everywhere.
-- **Tokens live in `expo-secure-store`, never AsyncStorage.** AsyncStorage is a plaintext file;
-  SecureStore uses the iOS Keychain and Android's hardware-backed Keystore, so the OS holds the
-  encryption key and the app never sees it.
-- **Login is rate limited per IP *and* per account.** Per-IP alone is weak against a botnet, where
-  every request comes from a different address and no per-IP budget is ever reached. A successful
-  login clears the account's counter, so limits punish failure rather than use.
-- **A completed password reset revokes every session.** People reset because they forgot — or
-  because they think they were compromised. An attacker holds a refresh token, not the password,
-  so changing the password alone would not touch them.
-- **Rate limit counters are shared, when `REDIS_URL` is set.** Without it they live in the memory
-  of one Python process, so two uvicorn workers keep separate tallies and a limit of ten becomes
-  ten *per worker* — fine on a laptop, wrong for any real deployment. `docker compose up -d`
-  starts one locally. If Redis then goes away at runtime the limiter falls back to per-process
-  counting and says so in the log, rather than either locking every user out or switching the
-  limits off entirely.
+- **FastAPI over Express.** Pydantic gives runtime validation and an OpenAPI schema from a single
+  declaration, and the nutrition calculations are easier to test in Python.
+- **One database.** Accounts, diary, recipes, the catalogue, saved meals and photographs all live in
+  Postgres. A diary entry holds a real foreign key to the food it records, and `ON DELETE RESTRICT`
+  prevents a saved meal from losing an ingredient and silently under-reporting its calories.
+- **Diary entries snapshot their nutrient values.** Source data is revised and recipes are edited; a
+  previous day's log must not change retroactively.
+- **Missing nutrients are `NULL`, not zero.** Daily totals report which nutrients some entry did not
+  provide, because a sum over gaps looks authoritative and is too low.
+- **Targets and recipe totals are computed on read.** They are pure functions of their inputs, so a stored
+  copy would go stale when an input changed.
+- **"Today" is the user's local day.** The server computes `local_date` from the profile's time zone; the
+  client never supplies it.
+- **Provider calls are proxied and cached.** Open Food Facts allows 15 requests per minute per IP, and
+  keys do not belong in a mobile bundle.
+- **Search is curated first.** USDA and Open Food Facts rows appear only when nothing curated matches,
+  so the default results are not dominated by laboratory-style names. Photo scanning uses a separate
+  search function with full access to all sources.
+- **Moderation is human.** A user-submitted food becomes visible to others only after an administrator
+  approves it. A report never changes a food on its own; an upheld report against a USDA or Open Food
+  Facts row withdraws it, because editing the numbers would leave the row claiming a provenance its
+  values no longer have. Withdrawn foods remain readable in existing diary entries.
+- **Tokens are held in `expo-secure-store`** (Keychain on iOS, Keystore on Android), not AsyncStorage.
+- **Rate limits apply per IP and per account**, so a distributed attack cannot avoid the per-account limit
+  and a shared address cannot lock out other users.
 
-### Two pipelines, and a person at the end of both
+## Status and known limitations
 
-Nothing becomes public, and nothing already public changes, without an admin deciding.
+| Area | State |
+|---|---|
+| Authentication, onboarding, targets, diary, recipes, catalogue, meals, photo scanning, progress, water | Implemented |
+| Moderation console | Implemented; functional but visually plain |
+| Food data | About 410 foods in the live database, of which 189 are Tunisian (INNTA). Ciqual (about 3,400 rows) is not imported |
+| Backend tests | Passing; run time is several minutes |
+| Mobile tests | None. The client is checked by the TypeScript compiler only |
+| Email | Supabase's built-in mailer is rate limited and intended for development. Configure custom SMTP, then enable email confirmation, before real users |
+| Languages | French and English. No Arabic interface |
+| Gaps | Typo-tolerant search, offline support, dark mode, a fully translated plan screen |
 
-    author  submits  ->  model screens  ->  admin decides  ->  everybody sees it
-    anyone  reports  ->  admin checks   ->  corrected, withdrawn, or dismissed
-
-- **Approval is the only route by which one user's typing reaches another's search.** The model's
-  screening verdict is recorded beside the decision and never makes it. A food is usable by its
-  author from the moment it is created — waiting for approval to log your own lunch would be absurd.
-- **Reporting is how a number already in the database gets challenged.** Open Food Facts is
-  volunteer-entered from labels, USDA rows can be decades old, and an approved submission was read
-  by one person once. Without a way to dispute those, "every number traceable to its source" is a
-  claim with no recourse behind it.
-- **A report never changes a food by itself.** If it could, anybody would hold a button that edits
-  a nutrition value or deletes a competitor's product.
-- **An upheld report against a USDA or Open Food Facts row cannot be "corrected".** The numbers are
-  that source's and `source`/`source_id` say so — editing them in place would leave a row claiming
-  a provenance its figures no longer have. The answer is withdrawal, and the fix belongs upstream.
-- **Withdrawal is not deletion.** A wrong food is usually already in somebody's diary. It leaves
-  search and the catalogue and stays readable, because a past entry is a record of what was logged,
-  not a number the app is still standing behind.
-
-### Actioning the queues: `/admin`
-
-The backend serves a one-file admin console at **`/admin`**. Sign in with an account that has
-`is_admin`, and both queues are there with an Approve/Reject and a Correct/Withdraw/Dismiss on
-each card.
-
-**It has no privileged access of its own.** It signs in with an ordinary admin account and calls
-exactly the endpoints the phone calls, which is the whole reason it exists rather than a page
-wired to Postgres: every rule that makes a decision safe — a rejection needs a reason, one
-decision closes every open report on a food, a USDA row cannot be corrected in place — lives in
-`api/v1/review.py` and in nothing else. A hand-written `UPDATE` in Supabase Studio walks past all
-of them, and so would any admin tool talking to the database directly.
-
-Every card shows the macro cross-check (4/4/9 against the declared calories, flagged past 10%),
-because that is the arithmetic a reviewer would otherwise do by hand and get wrong.
-
-Not in the mobile app, deliberately: admin tooling does not belong in a binary every user
-installs, and a client that cannot call the decision endpoints cannot be tricked into calling
-them. Set `ADMIN_UI_ENABLED=false` to remove the page; the API is unaffected.
-
-Both queues are also readable as SQL views — `review_queue` and `reported_foods` — which is the
-better tool for *looking* at a lot of them at once. Reading is a view; deciding goes through the
-API.
-
-### Known limitation: no email provider
-
-`backend/app/services/email.py` logs the reset link instead of sending it, and in development the
-token is echoed in the API response so the flow is testable end to end. The seam is real, so
-adding a provider in Phase 7 changes that one module.
-
----
-
-## Roadmap
-
-| Phase | Delivers | Status |
-|---|---|---|
-| 0 | Monorepo, Postgres, health endpoint, Expo app proving the pipe | ✅ |
-| 1 | Auth: register/login/refresh/logout, argon2id, JWT, secure token storage | ✅ |
-| 2 | Onboarding, BMR/TDEE/macro targets with full unit tests, results screen | ✅ |
-| 3 | USDA integration, normalization, caching, search | ✅ |
-| 4 | Diary: log to meal slots, daily summary, macro bar | ✅ |
-| 5 | Custom recipes with live nutrition totals | ✅ |
-| — | AI meal photo scanning (Gemini identifies foods and portions; USDA prices them) | ✅ |
-| 6 | Weight trends, weekly averages, streaks, empty/loading/error states throughout | |
-| 7 | Deployment, builds, screenshots | |
+The full list of remaining work is in [TODO.md](TODO.md).
