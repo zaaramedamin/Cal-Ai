@@ -2,8 +2,8 @@
 
 `test_supabase_auth.py` covers whether a token verifies. This covers what happens
 next: that a verified token resolves to a row in `users`, that the row is created
-on first sight, and that the legacy tokens keep working alongside it — which is
-the whole reason the mobile app can be migrated a screen at a time.
+on first sight, and that the hand-built auth is shut — its routes and its tokens
+both — for as long as Supabase is configured.
 """
 
 import time
@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.security import create_access_token, hash_password
 from app.core.supabase_auth import AUDIENCE, reset_key_cache
 from app.db.models.user import User
 
@@ -80,15 +81,17 @@ def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def register_local(client, email: str = "local@example.com") -> dict:
-    """Create an account through the hand-built auth, as the app does today."""
-    response = client.post(
-        "/api/v1/auth/register",
-        json={"email": email, "password": "correct-horse-battery"},
-    )
-    assert response.status_code == 201, response.text
-    body = response.json()
-    return {"email": email, "id": body["user"]["id"], "token": body["access_token"]}
+async def local_account(session, email: str = "local@example.com") -> User:
+    """A hand-built account, written straight to the table.
+
+    Not through `/auth/register`: that route is shut while Supabase is on, which
+    is what these tests are about. The row stands in for one created before the
+    switch, or by the lockout this change closes.
+    """
+    user = User(email=email, password_hash=hash_password("correct-horse-battery"))
+    session.add(user)
+    await session.commit()
+    return user
 
 
 # --------------------------------------------------------------------------- #
@@ -123,6 +126,32 @@ async def test_provisioning_happens_once(client, signing_key, session):
     assert len(rows) == 1
 
 
+async def test_a_returning_user_costs_no_write(client, signing_key, engine):
+    """Every request but the first finds the row, so none but the first writes.
+
+    Provisioning used to INSERT and COMMIT on every request regardless — three
+    round trips to eu-north-1 before the endpoint did any work of its own.
+    """
+    from sqlalchemy import event
+
+    token = supabase_token(signing_key, uuid.uuid4(), "returning@example.com")
+    assert client.get("/api/v1/users/me", headers=auth(token)).status_code == 200
+
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    try:
+        assert client.get("/api/v1/users/me", headers=auth(token)).status_code == 200
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record)
+
+    assert statements, "the listener saw nothing, so this test proves nothing"
+    assert not [s for s in statements if s.lstrip().upper().startswith("INSERT")]
+
+
 async def test_a_supabase_login_cannot_take_over_an_existing_email(
     client, signing_key, session
 ):
@@ -133,33 +162,66 @@ async def test_a_supabase_login_cannot_take_over_an_existing_email(
     fails. It must refuse rather than silently attach the login to that person's
     diary.
     """
-    existing = register_local(client, "taken@example.com")
-    token = supabase_token(signing_key, uuid.uuid4(), existing["email"])
+    existing = await local_account(session, "taken@example.com")
+    token = supabase_token(signing_key, uuid.uuid4(), existing.email)
 
     response = client.get("/api/v1/users/me", headers=auth(token))
     assert response.status_code == 401
 
 
-async def test_legacy_tokens_still_work(client):
-    """What makes the migration incremental: the app keeps working on the old
-    tokens until its screens have moved over."""
-    existing = register_local(client, "legacy@example.com")
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/auth/register",
+        "/api/v1/auth/login",
+        "/api/v1/auth/refresh",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/logout-all",
+        "/api/v1/auth/password-reset/request",
+        "/api/v1/auth/password-reset/confirm",
+    ],
+)
+async def test_the_hand_built_routes_are_shut(client, path):
+    """Every one of them, not just `/register`.
 
-    response = client.get("/api/v1/users/me", headers=auth(existing["token"]))
-    assert response.status_code == 200
-    assert response.json()["email"] == "legacy@example.com"
-
-
-async def test_a_forged_supabase_token_does_not_fall_through_to_the_legacy_path(
-    client, signing_key
-):
-    """The fallback must not become a bypass.
-
-    A token that fails Supabase verification is tried against the legacy scheme,
-    and that is fine only because the legacy check verifies its own signature. A
-    forged ES256 token is not a valid HS256 one, so it is refused twice rather
-    than once.
+    `/register` is the one that did damage: an unconfirmed account on somebody
+    else's address made their later Supabase sign-up fail for good, by the rule
+    the test above protects. But `/login` and `/refresh` would keep issuing
+    tokens the server no longer accepts, and the reset routes would email links
+    for passwords nobody signs in with.
     """
+    response = client.post(path, json={"email": "victim@example.com", "password": "x" * 12})
+    assert response.status_code == 404, response.text
+
+
+async def test_registering_creates_no_row(client, signing_key, session):
+    """The lockout, end to end: the route is shut, so the address stays free and
+    its owner's Supabase sign-up goes through."""
+    client.post(
+        "/api/v1/auth/register",
+        json={"email": "victim@example.com", "password": "correct-horse-battery"},
+    )
+
+    token = supabase_token(signing_key, uuid.uuid4(), "victim@example.com")
+    response = client.get("/api/v1/users/me", headers=auth(token))
+    assert response.status_code == 200, response.text
+
+
+async def test_a_hand_built_token_is_refused(client, session):
+    """Validly signed with `SECRET_KEY`, for a real account — and still refused.
+
+    Accepting these alongside Supabase's meant anyone holding `SECRET_KEY` could
+    sign in as anybody, on a server whose sign-in no longer uses that key.
+    """
+    existing = await local_account(session, "legacy@example.com")
+    token, _ = create_access_token(existing.id)
+
+    assert client.get("/api/v1/users/me", headers=auth(token)).status_code == 401
+
+
+async def test_a_forged_supabase_token_is_refused(client, signing_key):
+    """Signed by a key that is not the project's, so verification must fail —
+    and with no second scheme behind it to fall through to."""
     other_key = ec.generate_private_key(ec.SECP256R1())
     forged = supabase_token(other_key, uuid.uuid4(), "attacker@example.com")
 

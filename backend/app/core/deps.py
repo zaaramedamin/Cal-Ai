@@ -7,16 +7,15 @@ someone adds a route. A dependency is opted into per endpoint, so a protected
 route is protected because its signature says so — visible in the code, and
 impossible to forget by editing a config file somewhere else.
 
-**Two token formats are accepted while auth moves to Supabase.** A Supabase
-ES256 token is tried first; anything it rejects falls through to the hand-built
-HS256 one. That is what lets the mobile app keep working screen by screen instead
-of everything breaking on the day the backend switches — and the fallback is
-deleted, not left lying around, once the app no longer issues legacy tokens.
+**One token format per deployment.** With Supabase Auth configured, only a
+Supabase ES256 token is accepted and a hand-built HS256 one is refused outright.
+Without it — which is how the test suite runs — only the hand-built one is.
 
-The order matters and is not arbitrary: the legacy path trusts `SECRET_KEY`,
-which we hold, so trying it first would mean a forged-but-well-formed legacy
-token got a signature check before a genuine Supabase one. Supabase first keeps
-the stronger scheme authoritative.
+Both used to be accepted side by side, so the mobile app could move over a
+screen at a time. It has moved, and a fallback left in place meant `SECRET_KEY`
+could still mint a working token for any account, on a server whose sign-in no
+longer involves that key at all. The hand-built half is deleted once the tests
+stop relying on it; see TODO.md.
 """
 
 import logging
@@ -65,17 +64,28 @@ async def _provision(session: AsyncSession, user_id: UUID, email: str) -> User:
     the first authenticated request is the earliest moment we know the account is
     real, so it is created here rather than by a signup endpoint we no longer own.
 
-    `ON CONFLICT DO NOTHING` rather than select-then-insert: a phone that fires
-    several requests the instant it signs in would otherwise have two of them
-    find nothing and both insert, turning a race into a 500 on the user's very
-    first screen.
+    **Read first, write only on a miss.** This runs on every authenticated
+    request, and the row already exists on every one of them but the first. It
+    used to INSERT and COMMIT unconditionally, which is three round trips — about
+    250 ms against Supabase in eu-north-1 — spent before the endpoint did any work
+    of its own, and the home screen sends six requests at once. A primary-key
+    lookup is one round trip.
+
+    The insert still uses `ON CONFLICT DO NOTHING` rather than a plain INSERT: a
+    phone that fires several requests the instant it signs in will have more than
+    one of them miss the lookup, and a plain insert would turn that race into a
+    500 on the user's very first screen.
 
     Deliberately *unqualified* — no `index_elements`. Naming the id constraint
-    covers the ordinary repeat visit and leaves the interesting case unhandled:
-    a Supabase account whose email already belongs to a different local account.
-    That raises a unique violation on `email` instead, and unqualified DO NOTHING
-    turns it into "no row inserted", which the lookup below reads as a refusal.
+    covers the race above and leaves the interesting case unhandled: a Supabase
+    account whose email already belongs to a different local account. That
+    raises a unique violation on `email` instead, and unqualified DO NOTHING turns
+    it into "no row inserted", which the lookup below reads as a refusal.
     """
+    existing = await session.get(User, user_id)
+    if existing is not None:
+        return existing
+
     statement = (
         pg_insert(User)
         .values(id=user_id, email=email, password_hash=None)
@@ -114,17 +124,18 @@ async def get_current_user(
         try:
             claims = await verify_token(token)
         except InvalidSupabaseToken:
-            pass  # Not a Supabase token; the legacy path below may still accept it.
-        else:
-            email = email_from(claims)
-            if email is None:
-                # Every Supabase account in this app signs in with email, and the
-                # local row requires one. A token without it is not something to
-                # guess a value for.
-                raise CREDENTIALS_EXCEPTION
-            return await _provision(session, UUID(user_id_from(claims)), email)
+            # No fallthrough to the hand-built check. See the module docstring.
+            raise CREDENTIALS_EXCEPTION from None
 
-    # --- legacy, hand-built auth. Deleted once the app stops issuing these. ---
+        email = email_from(claims)
+        if email is None:
+            # Every Supabase account in this app signs in with email, and the
+            # local row requires one. A token without it is not something to
+            # guess a value for.
+            raise CREDENTIALS_EXCEPTION
+        return await _provision(session, UUID(user_id_from(claims)), email)
+
+    # --- hand-built auth, only when Supabase is not configured. ---
     user_id = decode_access_token(token)
     if user_id is None:
         raise CREDENTIALS_EXCEPTION

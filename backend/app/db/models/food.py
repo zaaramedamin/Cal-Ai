@@ -359,7 +359,7 @@ class Food(UUIDPrimaryKey, TimestampedCreation, Base):
     @property
     def is_correctable(self) -> bool:
         """Whether an admin may edit these numbers in place and republish."""
-        return True
+        return self.source not in (FoodSource.USDA, FoodSource.OFF)
 
     portions: Mapped[list["FoodPortion"]] = relationship(
         back_populates="food", cascade="all, delete-orphan", passive_deletes=True

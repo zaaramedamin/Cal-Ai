@@ -1,4 +1,16 @@
-"""Authentication endpoints."""
+"""Authentication endpoints — the hand-built auth, retired by Supabase Auth.
+
+**Every route here answers 404 while Supabase Auth is configured.** The mobile
+app and the admin console both sign in through Supabase, and leaving these open
+beside it was not harmless: `/register` created an account for any address
+without confirming it, and a Supabase sign-up with that address was then refused
+forever, because `_provision` will not attach a login to an email another row
+already holds. One POST was enough to lock a stranger out of the app.
+
+The routes survive only for a deployment with `SUPABASE_URL` unset, which is
+what the test suite runs as. Deleting them outright means moving ~25 test files
+onto Supabase-style tokens first — a separate change, noted in TODO.md.
+"""
 
 import logging
 import secrets
@@ -50,7 +62,26 @@ from app.services.email import send_password_reset
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+
+def _hand_built_auth_available() -> None:
+    """404 every route in this module while Supabase owns sign-in. See the
+    module docstring for the account-lockout this closes.
+
+    A dependency checked per request, not a condition around `include_router`:
+    the app is built once at import, and a route that exists or not depending on
+    the settings at that moment could not be tested either way.
+    """
+    if get_settings().supabase_auth_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+
+router = APIRouter(
+    prefix="/auth",
+    tags=["auth"],
+    # Router-level dependencies run before each route's own, so the gate answers
+    # before any rate-limit budget is spent or a password is hashed.
+    dependencies=[Depends(_hand_built_auth_available)],
+)
 
 # A real argon2 hash of a value nobody knows, verified against when a login names
 # an address with no account. Without it, "no such user" returns in ~1ms while a

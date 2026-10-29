@@ -134,6 +134,12 @@ def _prepare_database() -> Iterator[None]:
     # would leak from test to test and failures would depend on run order.
     # `test_rate_limit_redis.py` talks to Redis deliberately, on its own keys.
     os.environ["REDIS_URL"] = ""
+
+    # And the hand-built auth, whatever the developer's .env says. With Supabase
+    # configured it answers 404 and its tokens are refused, and nearly every test
+    # file still signs in through it. The Supabase tests switch it on themselves,
+    # against a fake project with a locally generated key.
+    os.environ["SUPABASE_URL"] = ""
     get_settings.cache_clear()
 
     config = Config(str(BACKEND_DIR / "alembic.ini"))

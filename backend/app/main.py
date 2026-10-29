@@ -138,18 +138,19 @@ def create_app() -> FastAPI:
         to its generic "something went wrong on the server". The one machine that
         knows exactly what is wrong says the least about it.
 
-        This project makes that easy to hit: the database is a container you are
-        told to start separately, so restarting the API without it is a normal
-        Tuesday. A JSON 503 naming the fix costs nothing and turns a debugging
-        session into a single command.
+        The message names both places the database can be, because both are
+        real: Supabase for the app, and the local container that the test suite
+        and an offline laptop use. Naming only the container sent people to start
+        Docker while `DATABASE_URL` pointed at Supabase all along.
         """
         logger.error("Database unreachable on %s %s: %s", request.method, request.url.path, exc)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={
                 "detail": (
-                    "The database isn't reachable. If you're running locally, start it with "
-                    "`docker compose up -d` and try again."
+                    "The database isn't reachable. Check the host in DATABASE_URL: for "
+                    "Supabase, that the project is not paused; for the local container, "
+                    "start it with `docker compose up -d`."
                 )
             },
         )
