@@ -1,0 +1,43 @@
+# Render Blueprint for the CalAi API.
+#
+# The database and authentication are on Supabase, so this is the only service.
+# Values marked `sync: false` are entered in the Render dashboard when the
+# Blueprint is created and are never stored in this file.
+
+services:
+  - type: web
+    name: calai-api
+    runtime: python
+    plan: free
+    # Closest Render region to the Supabase project (eu-north-1). Every request
+    # makes several database round trips, so distance is felt on each one.
+    region: frankfurt
+    rootDir: backend
+    buildCommand: pip install -e .
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.14
+      - key: ENVIRONMENT
+        value: production
+      # Only the legacy built-in auth signs with this, and it is disabled while
+      # Supabase is configured, but the settings refuse to start without one.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: USDA_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_TEXT_API_KEY
+        sync: false
+      - key: OFF_USER_AGENT
+        sync: false

@@ -241,7 +241,8 @@ building the mobile client against it.
 
 ### API
 
-Any host that runs a Python 3.13 web process works. With a managed host such as Render:
+`render.yaml` at the repository root is a Render Blueprint for the API. In the Render dashboard choose
+**New, Blueprint**, select this repository, and fill in the values it asks for. It configures:
 
 | Setting | Value |
 |---|---|
@@ -249,9 +250,9 @@ Any host that runs a Python 3.13 web process works. With a managed host such as 
 | Build command | `pip install -e .` |
 | Start command | `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | Health check path | `/api/v1/health` |
-| Python version | 3.13 (for example `PYTHON_VERSION=3.13.1`) |
+| Python version | 3.13 |
 
-Environment variables:
+Any other host that runs a Python 3.13 web process works with the same commands. Environment variables:
 
 | Variable | Notes |
 |---|---|
@@ -268,26 +269,27 @@ Free-tier hosts stop idle services, so the first request after a pause is slow.
 
 ### Mobile client
 
-Release builds are produced with Expo Application Services (EAS). Give the app a unique Android package
-name in `mobile/app.config.ts` (`android.package`), then:
+Release builds are produced with Expo Application Services (EAS); the profiles are in `mobile/eas.json`.
+`mobile/.env` is not uploaded to the build servers, so the three public variables are stored as EAS
+environment variables instead:
 
 ```powershell
 cd mobile
 npm install -g eas-cli
 eas login
-eas build:configure
-```
-
-Set the three public build variables for the build profile (in `eas.json` under `env`, or as EAS
-environment variables): `EXPO_PUBLIC_API_URL` (the deployed API origin, without a trailing slash),
-`EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`. Then build an installable Android package:
-
-```powershell
+eas init
+eas env:create --environment preview --name EXPO_PUBLIC_API_URL --value https://<api-host> --visibility plaintext
+eas env:create --environment preview --name EXPO_PUBLIC_SUPABASE_URL --value https://<project-ref>.supabase.co --visibility plaintext
+eas env:create --environment preview --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <anon key> --visibility plaintext
 eas build --platform android --profile preview
 ```
 
-with `"android": { "buildType": "apk" }` in the `preview` profile. iOS distribution requires an Apple
-Developer account.
+`eas init` cannot write to a TypeScript config, so add the project id it prints to `mobile/app.config.ts`
+as `extra.eas.projectId`. The `preview` profile produces an APK that installs directly on Android. iOS
+distribution requires an Apple Developer account.
+
+In Supabase, add `calai://**` to **Authentication, URL Configuration, Redirect URLs** so password-reset
+links open the installed app.
 
 For a demonstration without a native build, run `npx expo start` with `EXPO_PUBLIC_API_URL` set to the
 deployed API and open the project in Expo Go.

@@ -29,6 +29,8 @@ const config: ExpoConfig = {
   userInterfaceStyle: 'light',
 
   android: {
+    // Permanent once the app is published to Google Play.
+    package: 'com.zaara.calai',
     adaptiveIcon: {
       // Black, matching the launcher icon. The adaptive background is a flat
       // colour behind the foreground layer, so it has to agree with the mark or
